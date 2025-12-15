@@ -811,7 +811,8 @@
         try {
             app = initializeApp(firebaseConfig);
             auth = getAuth(app);
-            db = initializeFirestore(app, { experimentalForceLongPolling: true, useFetchStreams: false });
+            // Reverting persistence as it caused performance issues. Using standard settings.
+            db = initializeFirestore(app, {});
             setLogLevel('error');
         } catch (e) {
             console.error("Firebase initialization failed.", e);
@@ -832,6 +833,7 @@ let currentResidentsPerPage = 10;
 let currentTopics = [];
 let currentVotes = [];
 let unsubscribeTopics = () => {};
+let currentRenderLimit = 50;
 
         // --- Firestore Paths ---
         const eventsCollectionPath = () => ["events"];
@@ -1800,6 +1802,7 @@ const userDocPath = (userId) => ["users", userId];
 
             // --- Event-Specific Logic ---
             function initializeEventData(eventId) {
+                currentRenderLimit = 50;
                 unsubscribeSettings(); 
                 unsubscribeSettings = listenToEventSettings(eventId);
                 
@@ -2684,7 +2687,11 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     return;
                 }
                 
-                allResidentsForSelectedEvent.forEach((resident, index) => {
+                const limit = Math.min(currentRenderLimit, allResidentsForSelectedEvent.length);
+
+                for (let i = 0; i < limit; i++) {
+                    const resident = allResidentsForSelectedEvent[i];
+                    const index = i;
                     const tr = document.createElement('tr');
                     tr.id = `resident-row-${resident.id}`;
                     tr.className = resident.isCheckedIn ? 'checked-in-row' : '';
@@ -2712,7 +2719,32 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     `;
                     tbody.appendChild(tr);
                     new QRCode(document.getElementById(`qr-${resident.id}`), { text: qrValue, width: 48, height: 48 });
-                });
+                }
+
+                if (allResidentsForSelectedEvent.length > currentRenderLimit) {
+                    const loadMoreRow = document.createElement('tr');
+                    loadMoreRow.innerHTML = `
+                        <td colspan="11" class="p-4 text-center">
+                            <button id="load-more-residents-btn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 shadow">
+                                載入更多住戶 (還有 ${allResidentsForSelectedEvent.length - currentRenderLimit} 筆)
+                            </button>
+                            <button id="load-all-residents-btn" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 shadow ml-2">
+                                載入全部
+                            </button>
+                        </td>
+                    `;
+                    tbody.appendChild(loadMoreRow);
+                    
+                    document.getElementById('load-more-residents-btn').addEventListener('click', () => {
+                        currentRenderLimit += 50;
+                        renderAllResidents(tbody);
+                    });
+                    
+                    document.getElementById('load-all-residents-btn').addEventListener('click', () => {
+                        currentRenderLimit = allResidentsForSelectedEvent.length;
+                        renderAllResidents(tbody);
+                    });
+                }
             }
 
             function updateResidentRow(resident, index) {
@@ -4247,7 +4279,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 printShareBtn.addEventListener('click', () => {
                      const communityName = document.getElementById('community-name-display').textContent;
                      const eventName = document.getElementById('event-title-display').textContent;
-                     const eventDate = document.getElementById('event-date').value; 
+                     const eventDateRaw = document.getElementById('event-date').value; 
+                     const eventDate = eventDateRaw ? eventDateRaw.split('T')[0] : '';
                      
                      // Try to get QR code from img or canvas
                      const qrCodeImg = shareQrCodeContainer.querySelector('img');
@@ -4274,13 +4307,16 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             <title>列印 QR Code</title>
                             <style>
                                 @page { size: A4 portrait; margin: 0; }
+                                html, body {
+                                    width: 100%;
+                                    height: 100%;
+                                    margin: 0;
+                                    padding: 0;
+                                    overflow: hidden; /* Prevent second page */
+                                }
                                 body { 
                                     font-family: "Microsoft JhengHei", "Heiti TC", Arial, sans-serif; 
                                     text-align: center; 
-                                    padding: 0; 
-                                    margin: 0;
-                                    width: 100vw;
-                                    height: 100vh;
                                     -webkit-print-color-adjust: exact; 
                                     box-sizing: border-box;
                                 }
