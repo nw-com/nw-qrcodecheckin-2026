@@ -1038,11 +1038,6 @@ const userDocPath = (userId) => ["users", userId];
                     const userCredential = await signInWithEmailAndPassword(auth, emailForFirebase, password);
                     const user = userCredential.user;
                     
-                    const sessionId = crypto.randomUUID();
-                    localStorage.setItem('loginSessionId', sessionId);
-                    const userRef = doc(db, 'users', user.uid);
-                    await updateDoc(userRef, { loginSessionId: sessionId });
-
                     if (rememberMeCheckbox.checked) {
                         localStorage.setItem('qrSystemUsername', username);
                     } else {
@@ -1114,14 +1109,6 @@ const userDocPath = (userId) => ["users", userId];
             });
 
             const handleLogout = async () => {
-                if (currentUser && currentUser.uid) {
-                    const userRef = doc(db, 'users', currentUser.uid);
-                    try {
-                        await updateDoc(userRef, { loginSessionId: null });
-                    } catch (error) {
-                        console.error("Failed to clear session on logout:", error);
-                    }
-                }
                 localStorage.removeItem('loginSessionId');
                 signOut(auth);
             };
@@ -1218,18 +1205,6 @@ const userDocPath = (userId) => ["users", userId];
                        unsubscribeUsers = listenToUsers();
                     }
                     
-                    const localSessionId = localStorage.getItem('loginSessionId');
-                    unsubscribeSession = onSnapshot(doc(db, 'users', user.uid), (userDoc) => {
-                        if (userDoc.exists()) {
-                            const remoteSessionId = userDoc.data().loginSessionId;
-                            if (localSessionId && remoteSessionId && localSessionId !== remoteSessionId) {
-                                unsubscribeSession(); 
-                                showCustomAlert('您的帳號已在另一台裝置登入，此裝置將自動登出。', '強制登出');
-                                handleLogout();
-                            }
-                        }
-                    });
-
                     document.body.classList.remove('bg-red-600');
                     document.body.classList.add('bg-gray-50');
                     userDisplay.textContent = `${currentUser.name || ''}`;
@@ -2678,54 +2653,126 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 }
             });
 
+            function renderAllResidents(tbody) {
+                tbody.innerHTML = '';
+                if (allResidentsForSelectedEvent.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="11" class="p-4 text-center text-gray-500">請新增住戶</td></tr>`;
+                    return;
+                }
+                
+                allResidentsForSelectedEvent.forEach((resident, index) => {
+                    const tr = document.createElement('tr');
+                    tr.id = `resident-row-${resident.id}`;
+                    tr.className = resident.isCheckedIn ? 'checked-in-row' : '';
+                    
+                    const manualCheckinBtnClass = resident.isCheckedIn ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-400 hover:bg-gray-500';
+                    const manualCheckinBtnText = resident.isCheckedIn ? '取消報到' : '手動報到';
+                    const qrValue = resident.qrcodeValue || resident.id;
+
+                    tr.innerHTML = `
+                        <td class="px-2 py-2 whitespace-nowrap text-center">${resident.isCheckedIn ? '✔️' : '❌'}</td>
+                        <td class="px-2 py-2 whitespace-nowrap text-center">${index + 1}</td>
+                        <td class="px-2 py-2 whitespace-nowrap truncate">${resident.qrcodeValue || ''}</td>
+                        <td class="px-2 py-2 whitespace-nowrap text-sm font-medium">
+                            <button data-id="${resident.id}" class="manual-checkin-btn text-white text-xs py-1 px-2 rounded ${manualCheckinBtnClass}">${manualCheckinBtnText}</button>
+                            <button data-id="${resident.id}" class="edit-btn text-blue-600 hover:text-blue-900 ml-2">編輯</button>
+                            <button data-id="${resident.id}" class="delete-btn text-red-600 hover:text-red-900 ml-2">刪除</button>
+                        </td>
+                        <td class="px-2 py-2 whitespace-nowrap truncate">${resident.unit}</td>
+                        <td class="px-2 py-2 whitespace-nowrap truncate">${resident.name}</td>
+                        <td class="px-2 py-2 whitespace-nowrap truncate">${resident.address || ''}</td>
+                        <td class="px-2 py-2 whitespace-nowrap">${resident.area || 0}</td>
+                        <td class="px-2 py-2 whitespace-nowrap">${resident.householdCount || 1}</td>
+                        <td class="px-2 py-2 whitespace-nowrap">${resident.ownership || 0}%</td>
+                        <td class="px-2 py-2"><div id="qr-${resident.id}" class="mx-auto"></div></td>
+                    `;
+                    tbody.appendChild(tr);
+                    new QRCode(document.getElementById(`qr-${resident.id}`), { text: qrValue, width: 48, height: 48 });
+                });
+            }
+
+            function updateResidentRow(resident, index) {
+                const tr = document.getElementById(`resident-row-${resident.id}`);
+                if (!tr) return;
+
+                tr.className = resident.isCheckedIn ? 'checked-in-row' : '';
+                
+                // Update specific cells
+                tr.children[0].textContent = resident.isCheckedIn ? '✔️' : '❌';
+                tr.children[1].textContent = index + 1;
+                tr.children[2].textContent = resident.qrcodeValue || '';
+                
+                // Update Action Button
+                const btn = tr.querySelector('.manual-checkin-btn');
+                if (btn) {
+                    const manualCheckinBtnClass = resident.isCheckedIn ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-400 hover:bg-gray-500';
+                    const manualCheckinBtnText = resident.isCheckedIn ? '取消報到' : '手動報到';
+                    btn.className = `manual-checkin-btn text-white text-xs py-1 px-2 rounded ${manualCheckinBtnClass}`;
+                    btn.textContent = manualCheckinBtnText;
+                    btn.disabled = false;
+                }
+
+                // Update Data fields
+                tr.children[4].textContent = resident.unit;
+                tr.children[5].textContent = resident.name;
+                tr.children[6].textContent = resident.address || '';
+                tr.children[7].textContent = resident.area || 0;
+                tr.children[8].textContent = resident.householdCount || 1;
+                tr.children[9].textContent = `${resident.ownership || 0}%`;
+                
+                // Regenerate QR Code (fast for single row)
+                const qrContainer = tr.children[10].querySelector('div');
+                if (qrContainer) {
+                    qrContainer.innerHTML = '';
+                    new QRCode(qrContainer, { text: resident.qrcodeValue || resident.id, width: 48, height: 48 });
+                }
+            }
+
             function listenToResidents(eventId) {
                 const q = query(collection(db, ...residentsCollectionPath(eventId)));
                 return onSnapshot(q, (querySnapshot) => {
                     const residentsListTbody = document.getElementById('residents-list');
-                    residentsListTbody.innerHTML = '';
-                    allResidentsForSelectedEvent = [];
-                    querySnapshot.forEach((doc) => allResidentsForSelectedEvent.push({ id: doc.id, ...doc.data() }));
+                    const changes = querySnapshot.docChanges();
                     
-                    // Sort by creation time to respect CSV import order
-                    allResidentsForSelectedEvent.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-                    
-                    allResidentsForSelectedEvent.forEach((resident, index) => {
-                        const tr = document.createElement('tr');
-                        tr.className = resident.isCheckedIn ? 'checked-in-row' : '';
-                        
-                        const manualCheckinBtnClass = resident.isCheckedIn ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-400 hover:bg-gray-500';
-                        const manualCheckinBtnText = resident.isCheckedIn ? '取消報到' : '手動報到';
-                        const qrValue = resident.qrcodeValue || resident.id;
-
-                        tr.innerHTML = `
-                            <td class="px-2 py-2 whitespace-nowrap text-center">${resident.isCheckedIn ? '✔️' : '❌'}</td>
-                            <td class="px-2 py-2 whitespace-nowrap text-center">${index + 1}</td>
-                            <td class="px-2 py-2 whitespace-nowrap truncate">${resident.qrcodeValue || ''}</td>
-                            <td class="px-2 py-2 whitespace-nowrap text-sm font-medium">
-                                <button data-id="${resident.id}" class="manual-checkin-btn text-white text-xs py-1 px-2 rounded ${manualCheckinBtnClass}">${manualCheckinBtnText}</button>
-                                <button data-id="${resident.id}" class="edit-btn text-blue-600 hover:text-blue-900 ml-2">編輯</button>
-                                <button data-id="${resident.id}" class="delete-btn text-red-600 hover:text-red-900 ml-2">刪除</button>
-                            </td>
-                            <td class="px-2 py-2 whitespace-nowrap truncate">${resident.unit}</td>
-                            <td class="px-2 py-2 whitespace-nowrap truncate">${resident.name}</td>
-                            <td class="px-2 py-2 whitespace-nowrap truncate">${resident.address || ''}</td>
-                            <td class="px-2 py-2 whitespace-nowrap">${resident.area || 0}</td>
-                            <td class="px-2 py-2 whitespace-nowrap">${resident.householdCount || 1}</td>
-                            <td class="px-2 py-2 whitespace-nowrap">${resident.ownership || 0}%</td>
-                            <td class="px-2 py-2"><div id="qr-${resident.id}" class="mx-auto"></div></td>
-                        `;
-                        residentsListTbody.appendChild(tr);
-                        new QRCode(document.getElementById(`qr-${resident.id}`), { text: qrValue, width: 48, height: 48 });
+                    // Update local cache
+                    let needsSort = false;
+                    changes.forEach(change => {
+                        const data = { id: change.doc.id, ...change.doc.data() };
+                        if (change.type === 'added') {
+                            allResidentsForSelectedEvent.push(data);
+                            needsSort = true;
+                        } else if (change.type === 'modified') {
+                            const idx = allResidentsForSelectedEvent.findIndex(r => r.id === data.id);
+                            if (idx > -1) allResidentsForSelectedEvent[idx] = data;
+                        } else if (change.type === 'removed') {
+                            const idx = allResidentsForSelectedEvent.findIndex(r => r.id === data.id);
+                            if (idx > -1) allResidentsForSelectedEvent.splice(idx, 1);
+                        }
                     });
-
-                    if (allResidentsForSelectedEvent.length === 0) {
-                        residentsListTbody.innerHTML = `<tr><td colspan="11" class="p-4 text-center text-gray-500">請新增住戶</td></tr>`;
+                    
+                    if (needsSort) {
+                        allResidentsForSelectedEvent.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
                     }
 
-                    // Refresh topics table when residents change
-                    renderTopicsTable();
-
+                    // Decide render strategy
+                    const hasStructuralChanges = changes.some(c => c.type === 'added' || c.type === 'removed');
+                    
+                    if (residentsListTbody.children.length === 0 || hasStructuralChanges) {
+                         renderAllResidents(residentsListTbody);
+                    } else {
+                         changes.forEach(change => {
+                             if (change.type === 'modified') {
+                                 const resident = allResidentsForSelectedEvent.find(r => r.id === change.doc.id);
+                                 if (resident) {
+                                     const index = allResidentsForSelectedEvent.indexOf(resident);
+                                     updateResidentRow(resident, index);
+                                 }
+                             }
+                         });
+                    }
+                    
                     updateDashboardCalculations();
+                    renderTopicsTable();
                 });
             }
 
@@ -2955,11 +3002,29 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         const residentRef = doc(db, ...residentDocPath(selectedEventId, residentId));
                         if (resident.isCheckedIn) {
                             if (await showCustomConfirm(`確定要取消 ${resident.unit} ${resident.name} 的報到嗎？`)) {
-                                await updateDoc(residentRef, { isCheckedIn: false, checkInTimestamp: null, checkInMethod: null, checkInBy: null });
+                                // Optimistic UI update
+                                target.textContent = '取消中...';
+                                target.disabled = true;
+                                updateDoc(residentRef, { isCheckedIn: false, checkInTimestamp: null, checkInMethod: null, checkInBy: null })
+                                    .catch(err => {
+                                        console.error(err);
+                                        target.textContent = '取消報到';
+                                        target.disabled = false;
+                                        showCustomAlert('取消報到失敗，請重試');
+                                    });
                             }
                         } else {
                             if (await showCustomConfirm(`確定要為 ${resident.unit} ${resident.name} 手動報到嗎？`)) {
-                                await updateDoc(residentRef, { isCheckedIn: true, checkInTimestamp: new Date(), checkInMethod: '手動', checkInBy: currentUser.name });
+                                // Optimistic UI update
+                                target.textContent = '報到中...';
+                                target.disabled = true;
+                                updateDoc(residentRef, { isCheckedIn: true, checkInTimestamp: new Date(), checkInMethod: '手動', checkInBy: currentUser.name })
+                                    .catch(err => {
+                                        console.error(err);
+                                        target.textContent = '手動報到';
+                                        target.disabled = false;
+                                        showCustomAlert('報到失敗，請重試');
+                                    });
                             }
                         }
                     }
