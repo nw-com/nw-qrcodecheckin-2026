@@ -4816,6 +4816,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
             }
 
             function renderPublicVoteDashboard(eventData, residentsData) {
+                document.body.style.overflow = ''; // Allow body scroll
                 // 儀表板切換按鈕（報到/投票）
                 const toggleHtml = `
                     <div class="flex flex-nowrap items-center justify-center w-full gap-2">
@@ -4851,7 +4852,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
 
                 if (mode === 'tabs') {
                     // Tabs mode: make content container full width (single column)
-                    publicDashboardContent.className = 'grid grid-cols-1 gap-6 flex-grow overflow-y-auto min-h-0';
+                    publicDashboardContent.className = 'grid grid-cols-1 gap-6 flex-grow overflow-y-auto min-h-0 pb-20 md:pb-0';
                     const selectedIdx = Math.min(Math.max(parseInt(window.publicTopicIndex || 0, 10), 0), topics.length - 1);
                     const tabsHtml = topics.map((t, idx) => {
                         const active = idx === selectedIdx ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700';
@@ -4936,7 +4937,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     `;
                 } else {
                     // List mode: single column for one topic per row
-                    publicDashboardContent.className = 'grid grid-cols-1 gap-6 flex-grow overflow-y-auto min-h-0';
+                    publicDashboardContent.className = 'grid grid-cols-1 gap-6 flex-grow overflow-y-auto min-h-0 pb-20 md:pb-0';
                     // 列表模式：原本的全部議題一併呈現，加入切換控制與議題資訊
                     controlsHtml = `
                         <div class="relative w-full h-9">
