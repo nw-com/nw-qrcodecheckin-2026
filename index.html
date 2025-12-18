@@ -125,14 +125,14 @@
 <body class="bg-red-600 text-gray-800 transition-colors duration-300">
 
     <!-- Public View -->
-    <div id="public-dashboard-view" class="hidden max-w-7xl mx-auto p-4 md:p-6">
-         <header id="public-header" class="text-center mb-4 pb-4 border-b">
-             <h1 id="public-community-name-display" class="text-3xl font-bold text-red-700">載入中...</h1>
-             <p id="public-event-title-display" class="text-2xl text-gray-800 mt-1"></p>
+    <div id="public-dashboard-view" class="hidden max-w-7xl mx-auto p-4 md:p-6 h-screen flex flex-col overflow-hidden">
+         <header id="public-header" class="text-center mb-2 md:mb-6 pb-2 md:pb-4 border-b shrink-0">
+             <h1 id="public-community-name-display" class="text-2xl md:text-3xl font-bold text-red-700">載入中...</h1>
+             <p id="public-event-title-display" class="text-xl md:text-2xl text-gray-800 mt-1"></p>
          </header>
          <!-- Controls under header -->
-         <div id="public-controls" class="mb-4 flex items-center justify-between gap-3 flex-wrap"></div>
-         <div id="public-dashboard-content" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+         <div id="public-controls" class="mb-2 md:mb-4 flex items-center justify-between gap-3 flex-wrap shrink-0"></div>
+         <div id="public-dashboard-content" class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 overflow-y-auto pb-20 md:pb-0">
              <!-- Public dashboard cards will be injected here by JS -->
          </div>
     </div>
@@ -4763,12 +4763,10 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     </div>
                 `;
                 publicControls.innerHTML = toggleHtml;
-                document.body.style.overflow = 'hidden'; // Ensure no body scroll if content fits
+                document.body.style.overflow = ''; // Allow body scroll
                 
-                // 確保報到儀表板為兩欄（md 以上），並填滿剩餘空間，高度自適應
-                // grid-rows-4 for mobile (stack vertically filling height)
-                // md:grid-rows-2 for desktop (2x2 grid filling height)
-                publicDashboardContent.className = 'grid grid-rows-4 md:grid-rows-2 grid-cols-1 md:grid-cols-2 gap-4 flex-grow h-full overflow-hidden';
+                // Allow scrolling on mobile, grid on desktop
+                publicDashboardContent.className = 'grid grid-cols-1 md:grid-cols-2 gap-4 flex-grow h-full overflow-y-auto md:overflow-hidden pb-20 md:pb-0';
                 const chkBtn = publicControls.querySelector('#public-toggle-checkin');
                 const voteBtn = publicControls.querySelector('#public-toggle-vote');
                 if (chkBtn) chkBtn.addEventListener('click', (e) => { e.preventDefault(); updatePublicUrlAndTarget('checkin'); renderPublicDashboard(eventData, residentsData); });
