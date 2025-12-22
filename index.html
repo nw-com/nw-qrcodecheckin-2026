@@ -795,7 +795,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, initializeFirestore, setLogLevel, doc, getDoc, setDoc, collection, addDoc, query, where, onSnapshot, deleteDoc, updateDoc, writeBatch, getDocs, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, initializeFirestore, setLogLevel, doc, getDoc, setDoc, collection, addDoc, query, where, onSnapshot, deleteDoc, updateDoc, writeBatch, getDocs, serverTimestamp, Timestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Firebase Configuration ---
         const firebaseConfig = {
@@ -1081,6 +1081,14 @@ const userDocPath = (userId) => ["users", userId];
                     const userCredential = await signInWithEmailAndPassword(auth, emailForFirebase, password);
                     const user = userCredential.user;
                     
+                    // --- Single Session Enforcement ---
+                    const sessionId = Date.now().toString();
+                    localStorage.setItem('loginSessionId', sessionId);
+                    const userRef = doc(db, 'users', user.uid);
+                    // Update session ID in Firestore. 
+                    // Note: Rules allow user to update their own loginSessionId.
+                    await updateDoc(userRef, { loginSessionId: sessionId });
+
                     if (rememberMeCheckbox.checked) {
                         localStorage.setItem('qrSystemUsername', username);
                     } else {
@@ -1248,6 +1256,9 @@ const userDocPath = (userId) => ["users", userId];
                        unsubscribeUsers = listenToUsers();
                     }
                     
+                    // Start listening to session changes for single login enforcement
+                    unsubscribeSession = listenToSession(user.uid);
+
                     document.body.classList.remove('bg-red-600');
                     document.body.classList.add('bg-gray-50');
                     userDisplay.textContent = `${currentUser.name || ''}`;
@@ -2908,7 +2919,11 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const ownershipRate = (checkedInOwnership).toFixed(2);
                 document.getElementById('ownership-check-in-rate').textContent = `${ownershipRate}%`;
 
-                document.getElementById('person-ratio-target').textContent = `(目標: ${currentPersonQuorumRatio}%)`;
+                const targetHouseholds = Math.ceil(totalHouseholds * (parseFloat(currentPersonQuorumRatio) || 0) / 100);
+                const isReached = checkedInHouseholds >= targetHouseholds;
+                const reachedText = isReached ? ' (已到達)' : '';
+                const colorClass = isReached ? 'text-green-600' : 'text-red-600';
+                document.getElementById('person-ratio-target').innerHTML = `(目標: ${currentPersonQuorumRatio}%／目標戶數: ${targetHouseholds} | 報到戶數: <span class="${colorClass}">${checkedInHouseholds}${reachedText}</span>)`;
                 document.getElementById('ownership-ratio-target').textContent = `(目標: ${currentQuorumRatio}%)`;
 
 
@@ -3541,49 +3556,62 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 showLoader();
                 const eventRef = doc(db, ...eventDocPath(selectedEventId));
                 try {
-                    const snap = await getDoc(eventRef);
-                    const prev = (snap.exists() && Array.isArray(snap.data().votes)) ? snap.data().votes : [];
-                    // 1) 同一QR Code只能記錄一次
-                    if (prev.some(v => v.code === decodedText)) {
-                        statusEl.textContent = '重複投票：此QR Code已記錄';
-                        statusEl.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-yellow-100 text-yellow-800';
-                        speak('重複投票');
-                        return;
-                    }
-                    // 2) 若該議題未勾選複選，限制每位住戶對該議題只能投一次
-                    if (!topic.multiSelect && prev.some(v => v.topicId === topic.id && v.residentId === resident.id)) {
-                        statusEl.textContent = '已於該議題投票：不可重覆選擇';
-                        statusEl.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-yellow-100 text-yellow-800';
-                        speak('已於該議題投票');
-                        return;
-                    }
+                    const vote = await runTransaction(db, async (transaction) => {
+                        const snap = await transaction.get(eventRef);
+                        if (!snap.exists()) throw new Error("Event does not exist!");
+                        
+                        const prev = (snap.data().votes && Array.isArray(snap.data().votes)) ? snap.data().votes : [];
+                        
+                        // 1) 同一QR Code只能記錄一次
+                        if (prev.some(v => v.code === decodedText)) {
+                             throw { type: 'duplicate', msg: '重複投票：此QR Code已記錄' };
+                        }
+                        
+                        // 2) 若該議題未勾選複選，限制每位住戶對該議題只能投一次
+                        if (!topic.multiSelect && prev.some(v => v.topicId === topic.id && v.residentId === resident.id)) {
+                             throw { type: 'duplicate_topic', msg: '已於該議題投票：不可重覆選擇' };
+                        }
 
-                    const vote = {
-                        residentId: resident.id,
-                        unit: resident.unit,
-                        name: resident.name,
-                        topicId: topic.id,
-                        topicSerial,
-                        optionIndex,
-                        optionLabel: label,
-                        code: decodedText,
-                        createdAt: Timestamp.now(),
-                        source,
-                        createdBy: currentUser.name
-                    };
-                    await updateDoc(eventRef, { votes: [...prev, vote] });
+                        const newVote = {
+                            residentId: resident.id,
+                            unit: resident.unit,
+                            name: resident.name,
+                            topicId: topic.id,
+                            topicSerial,
+                            optionIndex,
+                            optionLabel: label,
+                            code: decodedText,
+                            createdAt: Timestamp.now(),
+                            source,
+                            createdBy: currentUser.name
+                        };
+                        
+                        transaction.update(eventRef, { votes: [...prev, newVote] });
+                        return newVote;
+                    });
+                    
                     statusEl.textContent = `投票成功：${resident.unit} ${resident.name} → 議題${topicSerial}「${label}」`;
                     statusEl.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-green-100 text-green-800';
                     speak('投票成功');
-                    voteList.innerHTML = `<li class=\"p-2 bg-gray-100 rounded-md\"><div><span class=\"font-bold\">${resident.unit} ${resident.name}</span> - ${simpleTime}</div><span class=\"text-sm text-gray-500 block\">投票：議題${topicSerial} - ${label}</span></li>` + voteList.innerHTML;
+                    voteList.innerHTML = `<li class="p-2 bg-gray-100 rounded-md"><div><span class="font-bold">${resident.unit} ${resident.name}</span> - ${simpleTime}</div><span class="text-sm text-gray-500 block">投票：議題${topicSerial} - ${label}</span></li>` + voteList.innerHTML;
                     // 本地快取與儀表板即時更新
                     try { currentVotes.push(vote); } catch (_) {}
                     updateDashboardCalculations();
                 } catch (err) {
-                    console.error('Vote persist error:', err);
-                    statusEl.textContent = '投票失敗：儲存錯誤';
-                    statusEl.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-red-100 text-red-700';
-                    speak('投票失敗');
+                    if (err.type === 'duplicate') {
+                        statusEl.textContent = err.msg;
+                        statusEl.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-yellow-100 text-yellow-800';
+                        speak('重複投票');
+                    } else if (err.type === 'duplicate_topic') {
+                        statusEl.textContent = err.msg;
+                        statusEl.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-yellow-100 text-yellow-800';
+                        speak('已於該議題投票');
+                    } else {
+                        console.error('Vote persist error:', err);
+                        statusEl.textContent = '投票失敗：儲存錯誤';
+                        statusEl.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-red-100 text-red-700';
+                        speak('投票失敗');
+                    }
                 } finally {
                     hideLoader();
                 }
@@ -3612,38 +3640,53 @@ const topicCells = currentTopics.map((t, tIdx) => {
 
                 const scannerStatus = document.getElementById('scanner-status');
                 
-                // 優化：改用本地資料搜尋，取代 Firestore 查詢，提升速度
-                const resident = allResidentsForSelectedEvent.find(r => r.qrcodeValue === decodedText);
+                // 使用 Transaction 確保資料一致性，避免併發導致的狀態錯誤
+                const residentLocal = allResidentsForSelectedEvent.find(r => r.qrcodeValue === decodedText);
 
-                if (resident) {
-                    const residentRef = doc(db, ...residentsCollectionPath(selectedEventId), resident.id);
-
-                    if (resident.isCheckedIn) {
-                        let timeStr = '';
-                        try {
-                            if (resident.checkInTimestamp && resident.checkInTimestamp.seconds) {
-                                timeStr = new Date(resident.checkInTimestamp.seconds * 1000).toLocaleTimeString('zh-TW');
-                            } else {
-                                timeStr = '稍早';
+                if (residentLocal) {
+                    const residentRef = doc(db, ...residentsCollectionPath(selectedEventId), residentLocal.id);
+                    
+                    try {
+                        await runTransaction(db, async (transaction) => {
+                            const sfDoc = await transaction.get(residentRef);
+                            if (!sfDoc.exists()) {
+                                throw "Document does not exist!";
                             }
-                        } catch (e) { timeStr = '未知時間'; }
-                        
-                        scannerStatus.textContent = `重複報到: ${resident.unit} ${resident.name} 已於 ${timeStr} 報到。`;
-                        scannerStatus.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-yellow-100 text-yellow-800';
-                        speak("重複掃碼");
-                    } else {
-                        try {
-                            await updateDoc(residentRef, { 
-                                isCheckedIn: true, 
+
+                            const data = sfDoc.data();
+                            if (data.isCheckedIn) {
+                                // 已經報到，拋出特定錯誤以供外部捕獲處理
+                                throw { type: 'duplicate', data: data };
+                            }
+
+                            transaction.update(residentRef, {
+                                isCheckedIn: true,
                                 checkInTimestamp: new Date(),
                                 checkInMethod: method,
                                 checkInBy: currentUser.name
                             });
-                            scannerStatus.textContent = `報到成功: ${resident.unit} ${resident.name}`;
-                            scannerStatus.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-green-100 text-green-800';
-                            speak("報到成功");
-                        } catch (err) {
-                            console.error(err);
+                        });
+
+                        scannerStatus.textContent = `報到成功: ${residentLocal.unit} ${residentLocal.name}`;
+                        scannerStatus.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-green-100 text-green-800';
+                        speak("報到成功");
+                    } catch (err) {
+                        if (err.type === 'duplicate') {
+                            const data = err.data;
+                            let timeStr = '';
+                            try {
+                                if (data.checkInTimestamp && data.checkInTimestamp.seconds) {
+                                    timeStr = new Date(data.checkInTimestamp.seconds * 1000).toLocaleTimeString('zh-TW');
+                                } else {
+                                    timeStr = '稍早';
+                                }
+                            } catch (e) { timeStr = '未知時間'; }
+                            
+                            scannerStatus.textContent = `重複報到: ${residentLocal.unit} ${residentLocal.name} 已於 ${timeStr} 報到。`;
+                            scannerStatus.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-yellow-100 text-yellow-800';
+                            speak("重複掃碼");
+                        } else {
+                            console.error("Transaction failed: ", err);
                             scannerStatus.textContent = `報到失敗：連線錯誤`;
                             scannerStatus.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-red-100 text-red-700';
                             speak("報到失敗");
@@ -4464,6 +4507,26 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 }
             });
 
+            function listenToSession(userId) {
+                 if (!userId) return () => {};
+                 const userRef = doc(db, 'users', userId);
+                 return onSnapshot(userRef, (docSnap) => {
+                     if (docSnap.exists()) {
+                         const data = docSnap.data();
+                         const remoteSessionId = data.loginSessionId;
+                         const localSessionId = localStorage.getItem('loginSessionId');
+                         
+                         // If remote session ID exists and differs from local, force logout
+                         if (remoteSessionId && localSessionId && remoteSessionId !== localSessionId) {
+                             alert('此帳號已在其他裝置登入，您將被登出。');
+                             handleLogout();
+                         }
+                     }
+                 }, (error) => {
+                     console.error("Session listener error:", error);
+                 });
+             }
+
             function listenToUsers() {
                  const q = query(collection(db, ...usersCollectionPath()));
                  return onSnapshot(q, (snapshot) => {
@@ -5058,6 +5121,11 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const personQuorumReached = personQuorumRatio > 0 && personRate >= personQuorumRatio;
                 const ownershipQuorumReached = ownershipQuorumRatio > 0 && ownershipRate >= ownershipQuorumRatio;
 
+                const targetHouseholdsVal = Math.ceil(totalHouseholds * (parseFloat(personQuorumRatio) || 0) / 100);
+                const isReachedVal = checkedInHouseholds >= targetHouseholdsVal;
+                const reachedTextVal = isReachedVal ? ' (已到達)' : '';
+                const colorClassVal = isReachedVal ? 'text-green-600' : 'text-red-600';
+
                 publicDashboardContent.innerHTML = `
                     <div class="bg-white px-6 py-6 rounded-xl shadow-md flex flex-col items-start justify-center h-full text-left">
                          <div>
@@ -5073,7 +5141,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     </div>
                     <div class="bg-white px-6 py-6 rounded-xl shadow-md flex flex-col items-start justify-center h-full text-left">
                          <div>
-                             <p class="text-2xl font-medium text-gray-500">戶數報到率 <span class="text-xs">(目標: ${personQuorumRatio}%)</span></p>
+                             <p class="text-2xl font-medium text-gray-500">戶數報到率 <span class="text-xs">(目標: ${personQuorumRatio}%／目標戶數: ${targetHouseholdsVal} | 報到戶數: <span class="${colorClassVal}">${checkedInHouseholds}${reachedTextVal}</span>)</span></p>
                              <p class="text-5xl font-bold text-orange-600">${personRate}%</p>
                          </div>
                         <span class="${personQuorumReached ? '' : 'hidden'} text-green-600 font-bold text-lg mt-2">已達法定開會人數</span>
