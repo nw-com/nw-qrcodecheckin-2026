@@ -3190,12 +3190,13 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     const residentsById = {};
                     const allResidents = Array.isArray(allResidentsForSelectedEvent) ? allResidentsForSelectedEvent : [];
                     allResidents.forEach(r => { residentsById[r.id] = r; });
-                    const eligibleResidents = allResidents.filter(r => r.isCheckedIn);
-                    const eligibleHouseholdsTotal = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
-                    const eligibleCount = eligibleHouseholdsTotal;
-                    const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
+                    const checkedInResidents = allResidents.filter(r => r.isCheckedIn);
                     let html = '';
                     (Array.isArray(currentTopics) ? currentTopics : []).forEach((t, idx) => {
+                        const eligibleResidents = checkedInResidents.filter(r => isResidentAllowedForTopic(r, t));
+                        const eligibleResidentIdSet = new Set(eligibleResidents.map(r => r.id));
+                        const eligibleCount = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
+                        const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
                         const tvotes = votes.filter(v => v.topicId === t.id);
                         // 以「住戶」為單位去重，同一住戶同一選項只計一次
                         // 建立 residentId -> Set<optionIndex> 的映射
@@ -3211,7 +3212,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             let count = 0;
                             let ownershipSum = 0;
                             selectionByResident.forEach((set, rid) => {
-                                if (set.has(optIdx)) {
+                                if (set.has(optIdx) && eligibleResidentIdSet.has(rid)) {
                                     const rr = residentsById[rid];
                                     const hc = parseInt(rr?.householdCount, 10) || 1;
                                     count += hc;
@@ -5402,10 +5403,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const residentsById = {};
                 const allResidents = Array.isArray(residentsData) ? residentsData : [];
                 allResidents.forEach(r => { residentsById[r.id] = r; });
-                const eligibleResidents = allResidents.filter(r => r.isCheckedIn);
-                const eligibleHouseholdsTotal = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
-                const eligibleCount = eligibleHouseholdsTotal;
-                const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
+                const checkedInResidents = allResidents.filter(r => r.isCheckedIn);
 
                 function getTopicDisplayNamePublic(topic, idx) {
                     const prefix = topic?.labelPrefix || '議題';
@@ -5442,6 +5440,10 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     `;
 
                     const t = topics[selectedIdx];
+                    const eligibleResidents = checkedInResidents.filter(r => isResidentAllowedForTopic(r, t));
+                    const eligibleResidentIdSet = new Set(eligibleResidents.map(r => r.id));
+                    const eligibleCount = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
+                    const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
                     const tvotes = votes.filter(v => v.topicId === t.id);
                     const selectionByResident = new Map();
                     tvotes.forEach(v => {
@@ -5455,7 +5457,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         let count = 0;
                         let ownershipSum = 0;
                         selectionByResident.forEach((set, rid) => {
-                            if (set.has(optIdx)) {
+                            if (set.has(optIdx) && eligibleResidentIdSet.has(rid)) {
                                 const rr = residentsById[rid];
                                 const hc = parseInt(rr?.householdCount, 10) || 1;
                                 count += hc;
@@ -5537,6 +5539,10 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         </div>
                     `;
                     topics.forEach((t, idx) => {
+                        const eligibleResidents = checkedInResidents.filter(r => isResidentAllowedForTopic(r, t));
+                        const eligibleResidentIdSet = new Set(eligibleResidents.map(r => r.id));
+                        const eligibleCount = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
+                        const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
                         const tvotes = votes.filter(v => v.topicId === t.id);
                         const selectionByResident = new Map();
                         tvotes.forEach(v => {
@@ -5549,7 +5555,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             let count = 0;
                             let ownershipSum = 0;
                             selectionByResident.forEach((set, rid) => {
-                                if (set.has(optIdx)) {
+                                if (set.has(optIdx) && eligibleResidentIdSet.has(rid)) {
                                     const rr = residentsById[rid];
                                     const hc = parseInt(rr?.householdCount, 10) || 1;
                                     count += hc;
