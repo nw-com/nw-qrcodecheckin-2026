@@ -379,6 +379,7 @@
                                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 10%;">QR Code碼</th>
                                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 15%;">操作</th>
                                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 10%;">戶號</th>
+                                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 7%;">棟別</th>
                                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 10%;">姓名</th>
                                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 20%;">住址</th>
                                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 8%;">坪數</th>
@@ -1871,6 +1872,8 @@ const userDocPath = (userId) => ["users", userId];
                         options: newTopic.options,
                         multiSelect: newTopic.multiSelect,
                         maxSelections: newTopic.maxSelections,
+                        allowedBuildingsMode: newTopic.allowedBuildingsMode || 'all',
+                        allowedBuildings: Array.isArray(newTopic.allowedBuildings) ? newTopic.allowedBuildings : [],
                         passCountThresholdPercent: newTopic.passCountThresholdPercent ?? 50,
                         passOwnershipThresholdPercent: newTopic.passOwnershipThresholdPercent ?? 50,
                         createdAt: Timestamp.now(),
@@ -1913,7 +1916,7 @@ const userDocPath = (userId) => ["users", userId];
             }
 
             function renderTopicsTable() {
-                const fixedHead = ['狀態','序號','戶號','姓名','坪數','區分權(%)'];
+                const fixedHead = ['狀態','序號','戶號','姓名','坪數','區分權(%)', '依報到人數的區分權比例'];
                 const topicHeads = currentTopics.map((t, i) => `${getTopicDisplayName(t, i)}投票`);
                 const headHtml = `
                     <tr>
@@ -1924,22 +1927,37 @@ const userDocPath = (userId) => ["users", userId];
                 topicsTableHead.innerHTML = headHtml;
 
                 const residents = Array.isArray(allResidentsForSelectedEvent) ? allResidentsForSelectedEvent : [];
+                
+                // Calculate total ownership of checked-in residents
+                const totalCheckedInOwnership = residents
+                    .filter(r => r.isCheckedIn)
+                    .reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
+
                 topicsTableBody.innerHTML = '';
                 residents.forEach((resident, idx) => {
                     const tr = document.createElement('tr');
                     tr.className = resident.isCheckedIn ? 'checked-in-row' : '';
                     const statusBadge = resident.isCheckedIn ? '✔️' : '❌';
                     const canVote = !!resident.isCheckedIn;
+                    
+                    // Calculate ratio based on checked-in ownership
+                    let checkedInRatio = '0.0000';
+                    if (resident.isCheckedIn && totalCheckedInOwnership > 0) {
+                        checkedInRatio = ((parseFloat(resident.ownership) || 0) / totalCheckedInOwnership * 100).toFixed(4);
+                    }
+
 const topicCells = currentTopics.map((t, tIdx) => {
     const hasVoted = (Array.isArray(currentVotes) ? currentVotes : []).some(v => v.residentId === resident.id && v.topicId === t.id);
-    const voteDisabled = !canVote || hasVoted;
+    const residentAllowed = isResidentAllowedForTopic(resident, t);
+    const voteDisabled = !canVote || hasVoted || !residentAllowed;
     const voteBtnClass = voteDisabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700';
-    const editBtnClass = canVote ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed';
+    const editDisabled = !canVote || !residentAllowed;
+    const editBtnClass = editDisabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700';
     return `
     <td class="px-4 py-2 text-center">
         <div class="flex flex-col items-center gap-1">
             <button class="topic-vote-btn ${voteBtnClass} text-white text-xs px-2 py-1 rounded" ${voteDisabled ? 'disabled' : ''} data-resident-index="${idx}" data-topic-index="${tIdx}">投票</button>
-            <button class="topic-edit-btn ${editBtnClass} text-white text-xs px-2 py-1 rounded" ${canVote ? '' : 'disabled'} data-resident-index="${idx}" data-topic-index="${tIdx}">編輯</button>
+            <button class="topic-edit-btn ${editBtnClass} text-white text-xs px-2 py-1 rounded" ${editDisabled ? 'disabled' : ''} data-resident-index="${idx}" data-topic-index="${tIdx}">編輯</button>
             <button class="topic-reset-btn bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded" data-resident-index="${idx}" data-topic-index="${tIdx}">重設</button>
         </div>
     </td>`;
@@ -1951,6 +1969,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         <td class="px-2 py-2 whitespace-nowrap truncate">${resident.name || ''}</td>
                         <td class="px-2 py-2 whitespace-nowrap">${resident.area || 0}</td>
                         <td class="px-2 py-2 whitespace-nowrap">${resident.ownership || 0}%</td>
+                        <td class="px-2 py-2 whitespace-nowrap">${checkedInRatio}%</td>
                         ${topicCells}
                     `;
                     topicsTableBody.appendChild(tr);
@@ -2050,6 +2069,10 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     showCustomAlert('尚未報到不可編輯投票', '限制');
                     return;
                 }
+                if (!isResidentAllowedForTopic(resident, topic)) {
+                    showCustomAlert('此棟別不可投票，無法編輯', '限制');
+                    return;
+                }
                 const existing = Array.isArray(currentVotes) ? currentVotes.filter(v => v.residentId === resident.id && v.topicId === topic.id) : [];
                 const preselected = existing.map(v => v.optionIndex);
                 const optionsHtml = (Array.isArray(topic.options) ? topic.options : []).map((opt, idx) => {
@@ -2097,6 +2120,10 @@ const topicCells = currentTopics.map((t, tIdx) => {
             }
 
             async function persistResidentTopicVotes(resident, topic, topicIdx, residentIdx, selectedOptionIndices) {
+                if (!isResidentAllowedForTopic(resident, topic)) {
+                    showCustomAlert('此棟別不可投票，無法儲存', '限制');
+                    return;
+                }
                 showLoader();
                 try {
                     const eventRef = doc(db, ...eventDocPath(selectedEventId));
@@ -2136,6 +2163,10 @@ const topicCells = currentTopics.map((t, tIdx) => {
             }
 
             async function resetResidentTopicVoteForResident(resident, topic, topicIdx, residentIdx) {
+                if (!isResidentAllowedForTopic(resident, topic)) {
+                    showCustomAlert('此棟別不可投票，無法重設', '限制');
+                    return;
+                }
                 const ok = await showCustomConfirm(`確定重設 ${resident.unit || ''} ${resident.name || ''} 在「${getTopicDisplayName(topic, topicIdx)}」的投票？`, '重設確認');
                 if (!ok) return;
                 showLoader();
@@ -2165,6 +2196,16 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         <button class="remove-opt-btn bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded" data-opt-index="${idx}">刪除</button>
                     </div>
                 `).join('');
+                const buildings = Array.from(new Set((allResidentsForSelectedEvent || []).map(r => getBuildingFromUnit(r.unit)).filter(b => !!b))).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+                const buildingOptionsHtml = buildings.map(b => `<option value="${b}">${b}</option>`).join('');
+                const buildingCheckboxesHtml = buildings.map(b => `
+                    <label class="inline-flex items-center gap-2 bg-gray-100 text-gray-800 text-sm px-2 py-1 rounded">
+                        <input type="checkbox" class="edit-topic-building-checkbox" value="${b}">
+                        ${b}
+                    </label>
+                `).join('');
+                const currentAllowedMode = topic?.allowedBuildingsMode || 'all';
+                const currentAllowedBuildings = Array.isArray(topic?.allowedBuildings) ? topic.allowedBuildings : [];
                 modalTitle.textContent = `編輯設定 - ${getTopicDisplayName(topic, topicIdx)}`;
                 modalMessage.innerHTML = `
                     <div class="space-y-3">
@@ -2180,6 +2221,25 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             <div>
                                 <label class="block text-sm">編號文字</label>
                                 <input id="edit-topic-serial" type="text" class="w-full px-3 py-2 border border-gray-300 rounded" value="${topic.serialText || (topicIdx + 1)}">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm">可投票棟別</label>
+                            <div class="flex items-center gap-4 flex-wrap mt-1">
+                                <label class="flex items-center gap-2"><input type="radio" name="edit-topic-building-mode" value="all" ${currentAllowedMode === 'all' ? 'checked' : ''}> 全部</label>
+                                <label class="flex items-center gap-2"><input type="radio" name="edit-topic-building-mode" value="single" ${currentAllowedMode === 'single' ? 'checked' : ''}> 單選</label>
+                                <label class="flex items-center gap-2"><input type="radio" name="edit-topic-building-mode" value="multi" ${currentAllowedMode === 'multi' ? 'checked' : ''}> 複選</label>
+                            </div>
+                            <div id="edit-topic-building-single-wrap" class="mt-2 ${currentAllowedMode === 'single' ? '' : 'hidden'}">
+                                <select id="edit-topic-building-single" class="w-full px-3 py-2 border border-gray-300 rounded">
+                                    <option value="">請選擇棟別</option>
+                                    ${buildingOptionsHtml}
+                                </select>
+                            </div>
+                            <div id="edit-topic-building-multi-wrap" class="mt-2 ${currentAllowedMode === 'multi' ? '' : 'hidden'}">
+                                <div id="edit-topic-building-multi" class="flex flex-wrap gap-2">
+                                    ${buildingCheckboxesHtml || '<div class="text-sm text-gray-500">尚無棟別資料</div>'}
+                                </div>
                             </div>
                         </div>
                         <div>
@@ -2221,6 +2281,32 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const multiEl = document.getElementById('edit-multi');
                 const maxEl = document.getElementById('edit-max');
                 multiEl.onchange = () => { maxEl.disabled = !multiEl.checked; };
+                const buildingModeRadios = Array.from(document.querySelectorAll('input[name="edit-topic-building-mode"]'));
+                const buildingSingleWrap = document.getElementById('edit-topic-building-single-wrap');
+                const buildingMultiWrap = document.getElementById('edit-topic-building-multi-wrap');
+                const buildingSingleSelect = document.getElementById('edit-topic-building-single');
+                const buildingMultiBox = document.getElementById('edit-topic-building-multi');
+                if (buildingSingleSelect && currentAllowedMode === 'single') {
+                    buildingSingleSelect.value = currentAllowedBuildings[0] || '';
+                }
+                if (buildingMultiBox && currentAllowedMode === 'multi') {
+                    Array.from(buildingMultiBox.querySelectorAll('input.edit-topic-building-checkbox')).forEach(cb => {
+                        cb.checked = currentAllowedBuildings.includes(cb.value);
+                    });
+                }
+                buildingModeRadios.forEach(r => r.onchange = () => {
+                    const mode = (document.querySelector('input[name="edit-topic-building-mode"]:checked')?.value) || 'all';
+                    if (mode === 'single') {
+                        buildingSingleWrap?.classList.remove('hidden');
+                        buildingMultiWrap?.classList.add('hidden');
+                    } else if (mode === 'multi') {
+                        buildingSingleWrap?.classList.add('hidden');
+                        buildingMultiWrap?.classList.remove('hidden');
+                    } else {
+                        buildingSingleWrap?.classList.add('hidden');
+                        buildingMultiWrap?.classList.add('hidden');
+                    }
+                });
 
                 document.getElementById('modal-save-btn').onclick = async () => {
                     // 先做權限檢查，避免觸發 Firestore 規則拒絕
@@ -2241,6 +2327,17 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     const multi = multiEl.checked;
                     const maxSel = parseInt(maxEl.value, 10) || 1;
                     if (optLabels.length === 0) { showCustomAlert('請至少保留一個投票項目'); return; }
+                    const allowedBuildingsMode = (document.querySelector('input[name="edit-topic-building-mode"]:checked')?.value) || 'all';
+                    let allowedBuildings = [];
+                    if (allowedBuildingsMode === 'single') {
+                        const b = (buildingSingleSelect?.value || '').trim();
+                        if (!b) { showCustomAlert('請選擇棟別'); return; }
+                        allowedBuildings = [b];
+                    } else if (allowedBuildingsMode === 'multi') {
+                        const selected = Array.from((buildingMultiBox || document.createElement('div')).querySelectorAll('input.edit-topic-building-checkbox:checked')).map(cb => cb.value);
+                        if (selected.length === 0) { showCustomAlert('請至少選擇一個棟別'); return; }
+                        allowedBuildings = selected;
+                    }
 
                     const eventId = selectedEventId;
                     const eventRef = doc(db, ...eventDocPath(eventId));
@@ -2251,7 +2348,9 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         serialText,
                         options: optLabels.map(l => ({ label: l })),
                         multiSelect: multi,
-                        maxSelections: multi ? maxSel : 1
+                        maxSelections: multi ? maxSel : 1,
+                        allowedBuildingsMode,
+                        allowedBuildings
                     };
                     try {
                         const snap = await getDoc(eventRef);
@@ -2291,6 +2390,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     options: [{label:'同意'},{label:'不同意'},{label:'棄票'}],
                     multiSelect: false,
                     maxSelections: 1,
+                    allowedBuildingsMode: 'all',
+                    allowedBuildings: [],
                     passCountThresholdPercent: 50,
                     passOwnershipThresholdPercent: 50
                 };
@@ -2298,6 +2399,14 @@ const topicCells = currentTopics.map((t, tIdx) => {
 
                 const units = Array.from(new Set((allResidentsForSelectedEvent || []).map(r => r.unit).filter(u => !!u)));
                 const unitOptionsHtml = units.map(u => `<option value="${u}">${u}</option>`).join('');
+                const buildings = Array.from(new Set((allResidentsForSelectedEvent || []).map(r => getBuildingFromUnit(r.unit)).filter(b => !!b))).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+                const buildingOptionsHtml = buildings.map(b => `<option value="${b}">${b}</option>`).join('');
+                const buildingCheckboxesHtml = buildings.map(b => `
+                    <label class="inline-flex items-center gap-2 bg-gray-100 text-gray-800 text-sm px-2 py-1 rounded">
+                        <input type="checkbox" class="topic-building-checkbox" value="${b}">
+                        ${b}
+                    </label>
+                `).join('');
 
                 modalTitle.textContent = initial ? '編輯議題' : '新增議題';
                 modalMessage.innerHTML = `
@@ -2319,6 +2428,25 @@ const topicCells = currentTopics.map((t, tIdx) => {
                                     <option value="">請選擇戶號</option>
                                     ${unitOptionsHtml}
                                 </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-700 mb-1">可投票棟別</label>
+                            <div class="flex items-center gap-4 flex-wrap">
+                                <label class="flex items-center gap-2"><input type="radio" name="topic-building-mode" value="all" ${!data.allowedBuildingsMode || data.allowedBuildingsMode === 'all' ? 'checked' : ''}/> 全部</label>
+                                <label class="flex items-center gap-2"><input type="radio" name="topic-building-mode" value="single" ${data.allowedBuildingsMode === 'single' ? 'checked' : ''}/> 單選</label>
+                                <label class="flex items-center gap-2"><input type="radio" name="topic-building-mode" value="multi" ${data.allowedBuildingsMode === 'multi' ? 'checked' : ''}/> 複選</label>
+                            </div>
+                            <div id="topic-building-single-wrap" class="mt-2 ${data.allowedBuildingsMode === 'single' ? '' : 'hidden'}">
+                                <select id="topic-building-single" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                                    <option value="">請選擇棟別</option>
+                                    ${buildingOptionsHtml}
+                                </select>
+                            </div>
+                            <div id="topic-building-multi-wrap" class="mt-2 ${data.allowedBuildingsMode === 'multi' ? '' : 'hidden'}">
+                                <div id="topic-building-multi" class="flex flex-wrap gap-2">
+                                    ${buildingCheckboxesHtml || '<div class="text-sm text-gray-500">尚無棟別資料</div>'}
+                                </div>
                             </div>
                         </div>
                         <div>
@@ -2389,6 +2517,34 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     }
                 }));
 
+                const buildingModeRadios = Array.from(document.querySelectorAll('input[name="topic-building-mode"]'));
+                const buildingSingleWrap = document.getElementById('topic-building-single-wrap');
+                const buildingMultiWrap = document.getElementById('topic-building-multi-wrap');
+                const buildingSingleSelect = document.getElementById('topic-building-single');
+                const buildingMultiBox = document.getElementById('topic-building-multi');
+                const initialAllowedBuildings = Array.isArray(data.allowedBuildings) ? data.allowedBuildings : [];
+                if (buildingSingleSelect && data.allowedBuildingsMode === 'single') {
+                    buildingSingleSelect.value = initialAllowedBuildings[0] || '';
+                }
+                if (buildingMultiBox && data.allowedBuildingsMode === 'multi') {
+                    Array.from(buildingMultiBox.querySelectorAll('input.topic-building-checkbox')).forEach(cb => {
+                        cb.checked = initialAllowedBuildings.includes(cb.value);
+                    });
+                }
+                buildingModeRadios.forEach(r => r.addEventListener('change', () => {
+                    const mode = (document.querySelector('input[name="topic-building-mode"]:checked')?.value) || 'all';
+                    if (mode === 'single') {
+                        buildingSingleWrap?.classList.remove('hidden');
+                        buildingMultiWrap?.classList.add('hidden');
+                    } else if (mode === 'multi') {
+                        buildingSingleWrap?.classList.add('hidden');
+                        buildingMultiWrap?.classList.remove('hidden');
+                    } else {
+                        buildingSingleWrap?.classList.add('hidden');
+                        buildingMultiWrap?.classList.add('hidden');
+                    }
+                }));
+
                 const multiCheckbox = document.getElementById('topic-multi');
                 const maxInput = document.getElementById('topic-max');
                 multiCheckbox.addEventListener('change', () => {
@@ -2422,6 +2578,23 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         const unit = proposerUnitSelect.classList.contains('hidden') ? '' : (proposerUnitSelect.value || '');
                         const multiSelect = multiCheckbox.checked;
                         const maxSelections = parseInt(maxInput.value, 10) || 1;
+                        const allowedBuildingsMode = (document.querySelector('input[name="topic-building-mode"]:checked')?.value) || 'all';
+                        let allowedBuildings = [];
+                        if (allowedBuildingsMode === 'single') {
+                            const b = (buildingSingleSelect?.value || '').trim();
+                            if (!b) {
+                                alert('請選擇棟別');
+                                return;
+                            }
+                            allowedBuildings = [b];
+                        } else if (allowedBuildingsMode === 'multi') {
+                            const selected = Array.from((buildingMultiBox || document.createElement('div')).querySelectorAll('input.topic-building-checkbox:checked')).map(cb => cb.value);
+                            if (selected.length === 0) {
+                                alert('請至少選擇一個棟別');
+                                return;
+                            }
+                            allowedBuildings = selected;
+                        }
                         const passCountThresholdPercent = Math.max(0, Math.min(100, parseFloat(document.getElementById('topic-pass-count-threshold').value) || 50));
                         const passOwnershipThresholdPercent = Math.max(0, Math.min(100, parseFloat(document.getElementById('topic-pass-ownership-threshold').value) || 50));
                         if (!title) {
@@ -2437,6 +2610,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             options,
                             multiSelect,
                             maxSelections,
+                            allowedBuildingsMode,
+                            allowedBuildings,
                             passCountThresholdPercent,
                             passOwnershipThresholdPercent
                         });
@@ -2474,11 +2649,33 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 return `${prefix}${serial}`;
             }
 
+            function getBuildingFromUnit(unit) {
+                if (!unit) return '';
+                const s = String(unit);
+                const parts = s.split('-');
+                return (parts[0] || '').trim();
+            }
+
+            function isResidentAllowedForTopic(resident, topic) {
+                const mode = topic?.allowedBuildingsMode || 'all';
+                if (mode === 'all') return true;
+                const allowed = Array.isArray(topic?.allowedBuildings) ? topic.allowedBuildings : [];
+                if (allowed.length === 0) return true;
+                const building = getBuildingFromUnit(resident?.unit);
+                if (!building) return false;
+                return allowed.includes(building);
+            }
+
             function showTopicVoteModal(resident, topic, topicIdx, residentIdx) {
     // 僅限已報到住戶可投票
     if (!resident?.isCheckedIn) {
         showCustomAlert('尚未報到：此住戶不可投票', '禁止投票');
         try { speak('尚未報到不可投票'); } catch (_) {}
+        return;
+    }
+    if (!isResidentAllowedForTopic(resident, topic)) {
+        showCustomAlert('此棟別不可投票', '禁止投票');
+        try { speak('此棟別不可投票'); } catch (_) {}
         return;
     }
                 const proposerText = topic?.proposer?.type === 'resident' ? `住戶(${topic?.proposer?.unit || ''})` : '管委會';
@@ -2717,7 +2914,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
             function renderAllResidents(tbody) {
                 tbody.innerHTML = '';
                 if (allResidentsForSelectedEvent.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="11" class="p-4 text-center text-gray-500">請新增住戶</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="12" class="p-4 text-center text-gray-500">請新增住戶</td></tr>`;
                     return;
                 }
                 
@@ -2744,6 +2941,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             <button data-id="${resident.id}" class="delete-btn text-red-600 hover:text-red-900 ml-2">刪除</button>
                         </td>
                         <td class="px-2 py-2 whitespace-nowrap truncate">${resident.unit}</td>
+                        <td class="px-2 py-2 whitespace-nowrap truncate">${getBuildingFromUnit(resident.unit)}</td>
                         <td class="px-2 py-2 whitespace-nowrap truncate">${resident.name}</td>
                         <td class="px-2 py-2 whitespace-nowrap truncate">${resident.address || ''}</td>
                         <td class="px-2 py-2 whitespace-nowrap">${resident.area || 0}</td>
@@ -2758,7 +2956,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 if (allResidentsForSelectedEvent.length > currentRenderLimit) {
                     const loadMoreRow = document.createElement('tr');
                     loadMoreRow.innerHTML = `
-                        <td colspan="11" class="p-4 text-center">
+                        <td colspan="12" class="p-4 text-center">
                             <button id="load-more-residents-btn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 shadow">
                                 載入更多住戶 (還有 ${allResidentsForSelectedEvent.length - currentRenderLimit} 筆)
                             </button>
@@ -2804,14 +3002,15 @@ const topicCells = currentTopics.map((t, tIdx) => {
 
                 // Update Data fields
                 tr.children[4].textContent = resident.unit;
-                tr.children[5].textContent = resident.name;
-                tr.children[6].textContent = resident.address || '';
-                tr.children[7].textContent = resident.area || 0;
-                tr.children[8].textContent = resident.householdCount || 1;
-                tr.children[9].textContent = `${resident.ownership || 0}%`;
+                tr.children[5].textContent = getBuildingFromUnit(resident.unit);
+                tr.children[6].textContent = resident.name;
+                tr.children[7].textContent = resident.address || '';
+                tr.children[8].textContent = resident.area || 0;
+                tr.children[9].textContent = resident.householdCount || 1;
+                tr.children[10].textContent = `${resident.ownership || 0}%`;
                 
                 // Regenerate QR Code (fast for single row)
-                const qrContainer = tr.children[10].querySelector('div');
+                const qrContainer = tr.children[11].querySelector('div');
                 if (qrContainer) {
                     qrContainer.innerHTML = '';
                     new QRCode(qrContainer, { text: resident.qrcodeValue || resident.id, width: 48, height: 48 });
@@ -2820,8 +3019,21 @@ const topicCells = currentTopics.map((t, tIdx) => {
 
             function listenToResidents(eventId) {
                 const q = query(collection(db, ...residentsCollectionPath(eventId)));
+                let initialized = false;
                 return onSnapshot(q, (querySnapshot) => {
                     const residentsListTbody = document.getElementById('residents-list');
+                    if (!initialized) {
+                        allResidentsForSelectedEvent = [];
+                        querySnapshot.forEach((docSnap) => {
+                            allResidentsForSelectedEvent.push({ id: docSnap.id, ...docSnap.data() });
+                        });
+                        allResidentsForSelectedEvent.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+                        renderAllResidents(residentsListTbody);
+                        updateDashboardCalculations();
+                        renderTopicsTable();
+                        initialized = true;
+                        return;
+                    }
                     const changes = querySnapshot.docChanges();
                     
                     // Update local cache
@@ -2994,6 +3206,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         });
                         const votedEligibleHouseholds = eligibleResidents.reduce((sum, r) => selectionByResident.has(r.id) ? sum + (parseInt(r.householdCount, 10) || 1) : sum, 0);
                         const notVotedEligibleHouseholds = Math.max(eligibleCount - votedEligibleHouseholds, 0);
+                        const notVotedOwnershipSum = eligibleResidents.reduce((sum, r) => !selectionByResident.has(r.id) ? sum + (parseFloat(r.ownership) || 0) : sum, 0);
                         const optionStats = (Array.isArray(t.options) ? t.options : []).map((opt, optIdx) => {
                             let count = 0;
                             let ownershipSum = 0;
@@ -3023,6 +3236,18 @@ const topicCells = currentTopics.map((t, tIdx) => {
                                 </div>
                             `;
                         }).join('');
+                        
+                        // Add "Not Voted" block
+                        const notVotedCountRatio = eligibleCount > 0 ? (notVotedEligibleHouseholds / eligibleCount) * 100 : 0;
+                        const notVotedOwnershipRatio = eligibleOwnershipTotal > 0 ? (notVotedOwnershipSum / eligibleOwnershipTotal) * 100 : 0;
+                        const notVotedHtml = `
+                            <div class="border border-gray-200 rounded-md p-3 bg-gray-50">
+                                <div class="font-semibold text-gray-600">未投票</div>
+                                <div class="text-sm text-gray-600">票數：${notVotedEligibleHouseholds}（${notVotedCountRatio.toFixed(2)}%）</div>
+                                <div class="text-sm text-gray-600">區分權比例：${notVotedOwnershipRatio.toFixed(2)}%</div>
+                            </div>
+                        `;
+
                         html += `
                             <div class="bg-white p-4 rounded-lg shadow-sm">
                                 <div class="flex items-center justify-between">
@@ -3035,6 +3260,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                                 </div>
                                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
                                     ${optsHtml}
+                                    ${notVotedHtml}
                                 </div>
                             </div>
                         `;
@@ -3547,6 +3773,12 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     statusEl.textContent = '禁止投票：尚未報到';
                     statusEl.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-red-100 text-red-700';
                     try { speak('尚未報到不可投票'); } catch (_) {}
+                    return;
+                }
+                if (!isResidentAllowedForTopic(resident, topic)) {
+                    statusEl.textContent = '禁止投票：此棟別不可投票';
+                    statusEl.className = 'mt-4 text-center font-semibold p-3 rounded-md bg-red-100 text-red-700';
+                    try { speak('此棟別不可投票'); } catch (_) {}
                     return;
                 }
 
@@ -5218,6 +5450,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     });
                     const votedEligibleHouseholds = eligibleResidents.reduce((sum, r) => selectionByResident.has(r.id) ? sum + (parseInt(r.householdCount, 10) || 1) : sum, 0);
                     const notVotedEligibleHouseholds = Math.max(eligibleCount - votedEligibleHouseholds, 0);
+                    const notVotedOwnershipSum = eligibleResidents.reduce((sum, r) => !selectionByResident.has(r.id) ? sum + (parseFloat(r.ownership) || 0) : sum, 0);
                     const optionStats = (Array.isArray(t.options) ? t.options : []).map((opt, optIdx) => {
                         let count = 0;
                         let ownershipSum = 0;
@@ -5233,7 +5466,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     });
                     const countThreshold = parseFloat(t.passCountThresholdPercent ?? 50);
                     const ownershipThreshold = parseFloat(t.passOwnershipThresholdPercent ?? 50);
-                    const columns = optionStats.length || 1;
+                    const columns = (optionStats.length || 1) + 1; // +1 for "Not Voted" block
                     const optsHtml = optionStats.map(s => {
                         const countRatio = eligibleCount > 0 ? (s.count / eligibleCount) * 100 : 0;
                         const ownershipRatio = eligibleOwnershipTotal > 0 ? (s.ownership / eligibleOwnershipTotal) * 100 : 0;
@@ -5254,6 +5487,22 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             </div>
                         `;
                     }).join('');
+                    
+                    const notVotedCountRatio = eligibleCount > 0 ? (notVotedEligibleHouseholds / eligibleCount) * 100 : 0;
+                    const notVotedOwnershipRatio = eligibleOwnershipTotal > 0 ? (notVotedOwnershipSum / eligibleOwnershipTotal) * 100 : 0;
+                    const notVotedHtml = `
+                        <div class="border border-gray-200 rounded-md p-3 bg-gray-50">
+                            <div class="font-semibold whitespace-nowrap text-xs sm:text-sm md:text-base lg:text-xl xl:text-2xl mb-2 text-gray-600">未投票</div>
+                            <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl mb-1">
+                                <div class="whitespace-nowrap">投票戶數：</div>
+                                <div class="whitespace-nowrap font-bold text-gray-600">${notVotedEligibleHouseholds}（${notVotedCountRatio.toFixed(2)}%）</div>
+                            </div>
+                            <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl">
+                                <div class="whitespace-nowrap">區分權比例：</div>
+                                <div class="whitespace-nowrap font-bold text-gray-600">${notVotedOwnershipRatio.toFixed(2)}%</div>
+                            </div>
+                        </div>
+                    `;
 
                     const proposerText = t?.proposer?.type === 'resident' ? `住戶(${t?.proposer?.unit || ''})` : '管委會';
                     const displayName = getTopicDisplayNamePublic(t, selectedIdx);
@@ -5273,6 +5522,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             </div>
                             <div class="grid gap-3 mt-3" style="grid-template-columns: repeat(${columns}, minmax(0, 1fr));">
                                 ${optsHtml}
+                                ${notVotedHtml}
                             </div>
                         </div>
                     `;
