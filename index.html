@@ -5032,6 +5032,23 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 publicTarget = target;
             };
 
+            function getBuildingFromUnitPublic(unit) {
+                if (!unit) return '';
+                const s = String(unit);
+                const parts = s.split('-');
+                return (parts[0] || '').trim();
+            }
+
+            function isResidentAllowedForTopicPublic(resident, topic) {
+                const mode = topic?.allowedBuildingsMode || 'all';
+                if (mode === 'all') return true;
+                const allowed = Array.isArray(topic?.allowedBuildings) ? topic.allowedBuildings : [];
+                if (allowed.length === 0) return true;
+                const building = getBuildingFromUnitPublic(resident?.unit);
+                if (!building) return false;
+                return allowed.includes(building);
+            }
+
             let publicCheckinSortMode = 'none';
 
             const eventRef = doc(db, ...eventDocPath(eventId));
@@ -5440,7 +5457,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     `;
 
                     const t = topics[selectedIdx];
-                    const eligibleResidents = checkedInResidents.filter(r => isResidentAllowedForTopic(r, t));
+                    const eligibleResidents = checkedInResidents.filter(r => isResidentAllowedForTopicPublic(r, t));
                     const eligibleResidentIdSet = new Set(eligibleResidents.map(r => r.id));
                     const eligibleCount = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
                     const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
@@ -5539,7 +5556,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         </div>
                     `;
                     topics.forEach((t, idx) => {
-                        const eligibleResidents = checkedInResidents.filter(r => isResidentAllowedForTopic(r, t));
+                        const eligibleResidents = checkedInResidents.filter(r => isResidentAllowedForTopicPublic(r, t));
                         const eligibleResidentIdSet = new Set(eligibleResidents.map(r => r.id));
                         const eligibleCount = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
                         const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
