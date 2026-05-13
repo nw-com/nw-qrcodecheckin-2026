@@ -1081,14 +1081,6 @@ const userDocPath = (userId) => ["users", userId];
                 try {
                     const userCredential = await signInWithEmailAndPassword(auth, emailForFirebase, password);
                     const user = userCredential.user;
-                    
-                    // --- Single Session Enforcement ---
-                    const sessionId = Date.now().toString();
-                    localStorage.setItem('loginSessionId', sessionId);
-                    const userRef = doc(db, 'users', user.uid);
-                    // Update session ID in Firestore. 
-                    // Note: Rules allow user to update their own loginSessionId.
-                    await updateDoc(userRef, { loginSessionId: sessionId });
 
                     if (rememberMeCheckbox.checked) {
                         localStorage.setItem('qrSystemUsername', username);
@@ -1161,7 +1153,6 @@ const userDocPath = (userId) => ["users", userId];
             });
 
             const handleLogout = async () => {
-                localStorage.removeItem('loginSessionId');
                 signOut(auth);
             };
 
@@ -1237,7 +1228,6 @@ const userDocPath = (userId) => ["users", userId];
                 unsubscribeResidents();
                 unsubscribeSettings();
                 unsubscribeUsers();
-                unsubscribeSession();
 
                 if (user && user.email) {
                     const username = user.email.split('@')[0];
@@ -1256,9 +1246,6 @@ const userDocPath = (userId) => ["users", userId];
                     if(currentUser.role === 'system_admin') {
                        unsubscribeUsers = listenToUsers();
                     }
-                    
-                    // Start listening to session changes for single login enforcement
-                    unsubscribeSession = listenToSession(user.uid);
 
                     document.body.classList.remove('bg-red-600');
                     document.body.classList.add('bg-gray-50');
@@ -4739,26 +4726,6 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     hideLoader();
                 }
             });
-
-            function listenToSession(userId) {
-                 if (!userId) return () => {};
-                 const userRef = doc(db, 'users', userId);
-                 return onSnapshot(userRef, (docSnap) => {
-                     if (docSnap.exists()) {
-                         const data = docSnap.data();
-                         const remoteSessionId = data.loginSessionId;
-                         const localSessionId = localStorage.getItem('loginSessionId');
-                         
-                         // If remote session ID exists and differs from local, force logout
-                         if (remoteSessionId && localSessionId && remoteSessionId !== localSessionId) {
-                             alert('此帳號已在其他裝置登入，您將被登出。');
-                             handleLogout();
-                         }
-                     }
-                 }, (error) => {
-                     console.error("Session listener error:", error);
-                 });
-             }
 
             function listenToUsers() {
                  const q = query(collection(db, ...usersCollectionPath()));
