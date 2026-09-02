@@ -386,9 +386,21 @@
                                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 8%;">戶數</th>
                                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 10%;">區分權(%)</th>
                                         <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 7%;">QR Code</th>
+                                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 8%;">有效票數</th>
+                                        <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 10%;">有效區分權比(%)</th>
                                     </tr>
                                 </thead>
                                 <tbody id="residents-list" class="bg-white divide-y divide-gray-200"></tbody>
+                                <tfoot id="residents-list-footer" class="bg-gray-100 font-semibold sticky bottom-0">
+                                    <tr>
+                                        <td class="px-2 py-2 text-center" colspan="9">彙總</td>
+                                        <td class="px-2 py-2 text-center" id="footer-total-households">0</td>
+                                        <td class="px-2 py-2 text-center" id="footer-total-ownership">0%</td>
+                                        <td class="px-2 py-2"></td>
+                                        <td class="px-2 py-2 text-center text-red-600" id="footer-total-valid-votes">0</td>
+                                        <td class="px-2 py-2 text-center text-orange-600" id="footer-total-valid-ownership">0%</td>
+                                    </tr>
+                                </tfoot>
                             </table>
                         </div>
                     </div>
@@ -699,6 +711,14 @@
                     <div>
                         <label for="resident-household-count" class="block text-sm font-medium text-gray-700">戶數</label>
                         <input type="number" id="resident-household-count" step="1" min="1" value="1" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500" placeholder="預設為 1">
+                    </div>
+                    <div>
+                        <label for="resident-valid-votes" class="block text-sm font-medium text-gray-700">有效票數</label>
+                        <input type="number" id="resident-valid-votes" step="1" min="1" value="1" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500" placeholder="預設同戶數">
+                    </div>
+                    <div>
+                        <label for="resident-valid-ownership" class="block text-sm font-medium text-gray-700">有效區分權比 (%)</label>
+                        <input type="number" id="resident-valid-ownership" step="0.0001" min="0" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500" placeholder="預設同區分權比例">
                     </div>
                 </div>
                  <div class="items-center px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
@@ -2837,6 +2857,20 @@ const topicCells = currentTopics.map((t, tIdx) => {
             const residentAreaInput = document.getElementById('resident-area');
             const residentOwnershipInput = document.getElementById('resident-ownership');
             const residentHouseholdCountInput = document.getElementById('resident-household-count');
+            const residentValidVotesInput = document.getElementById('resident-valid-votes');
+            const residentValidOwnershipInput = document.getElementById('resident-valid-ownership');
+
+            function getResidentValidVotes(resident) {
+                const vv = parseInt(resident?.validVotes, 10);
+                if (!isNaN(vv) && vv > 0) return vv;
+                return parseInt(resident?.householdCount, 10) || 1;
+            }
+
+            function getResidentValidOwnership(resident) {
+                const vo = parseFloat(resident?.validOwnership);
+                if (!isNaN(vo) && vo >= 0) return vo;
+                return parseFloat(resident?.ownership) || 0;
+            }
 
             function openResidentModal(resident = null) {
                 addResidentForm.reset();
@@ -2850,10 +2884,14 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     residentAreaInput.value = resident.area || 0;
                     residentOwnershipInput.value = resident.ownership || 0;
                     residentHouseholdCountInput.value = resident.householdCount || 1;
+                    residentValidVotesInput.value = getResidentValidVotes(resident);
+                    residentValidOwnershipInput.value = getResidentValidOwnership(resident);
                 } else {
                     residentModalTitle.textContent = '新增住戶';
                     residentIdInput.value = '';
                     residentHouseholdCountInput.value = 1;
+                    residentValidVotesInput.value = 1;
+                    residentValidOwnershipInput.value = '';
                 }
                 residentModal.classList.remove('hidden');
             }
@@ -2877,16 +2915,19 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const area = parseFloat(residentAreaInput.value) || 0;
                 const ownership = parseFloat(residentOwnershipInput.value) || 0;
                 const householdCount = parseInt(residentHouseholdCountInput.value, 10) || 1;
+                const validVotes = parseInt(residentValidVotesInput.value, 10) || householdCount;
+                const validOwnershipRaw = residentValidOwnershipInput.value === '' ? NaN : parseFloat(residentValidOwnershipInput.value);
+                const validOwnership = (!isNaN(validOwnershipRaw) && validOwnershipRaw >= 0) ? validOwnershipRaw : ownership;
                 const residentId = residentIdInput.value;
                 const createdAt = Date.now();
 
                 try {
                     if (residentId) {
                         const residentRef = doc(db, ...residentDocPath(selectedEventId, residentId));
-                        await updateDoc(residentRef, { qrcodeValue, unit, name, address, area, ownership, householdCount });
+                        await updateDoc(residentRef, { qrcodeValue, unit, name, address, area, ownership, householdCount, validVotes, validOwnership });
                     } else {
                         await addDoc(collection(db, ...residentsCollectionPath(selectedEventId)), {
-                            qrcodeValue, unit, name, address, area, ownership, householdCount, isCheckedIn: false, checkInTimestamp: null, createdAt
+                            qrcodeValue, unit, name, address, area, ownership, householdCount, validVotes, validOwnership, isCheckedIn: false, checkInTimestamp: null, createdAt
                         });
                     }
                     closeResidentModal();
@@ -2898,10 +2939,29 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 }
             });
 
+            function updateResidentsListFooter() {
+                const totalHouseholds = (Array.isArray(allResidentsForSelectedEvent) ? allResidentsForSelectedEvent : []).reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
+                const totalOwnership = (Array.isArray(allResidentsForSelectedEvent) ? allResidentsForSelectedEvent : []).reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
+                const totalValidVotes = (Array.isArray(allResidentsForSelectedEvent) ? allResidentsForSelectedEvent : []).reduce((sum, r) => sum + getResidentValidVotes(r), 0);
+                const totalValidOwnership = (Array.isArray(allResidentsForSelectedEvent) ? allResidentsForSelectedEvent : []).reduce((sum, r) => sum + getResidentValidOwnership(r), 0);
+                const footerEl = document.getElementById('residents-list-footer');
+                if (footerEl) {
+                    const hhEl = document.getElementById('footer-total-households');
+                    const ownEl = document.getElementById('footer-total-ownership');
+                    const vvEl = document.getElementById('footer-total-valid-votes');
+                    const voEl = document.getElementById('footer-total-valid-ownership');
+                    if (hhEl) hhEl.textContent = totalHouseholds;
+                    if (ownEl) ownEl.textContent = `${totalOwnership.toFixed(2)}%`;
+                    if (vvEl) vvEl.textContent = totalValidVotes;
+                    if (voEl) voEl.textContent = `${totalValidOwnership.toFixed(2)}%`;
+                }
+            }
+
             function renderAllResidents(tbody) {
                 tbody.innerHTML = '';
                 if (allResidentsForSelectedEvent.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="12" class="p-4 text-center text-gray-500">請新增住戶</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="14" class="p-4 text-center text-gray-500">請新增住戶</td></tr>`;
+                    updateResidentsListFooter();
                     return;
                 }
                 
@@ -2917,6 +2977,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     const manualCheckinBtnClass = resident.isCheckedIn ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-400 hover:bg-gray-500';
                     const manualCheckinBtnText = resident.isCheckedIn ? '取消報到' : '手動報到';
                     const qrValue = resident.qrcodeValue || resident.id;
+                    const validVotes = getResidentValidVotes(resident);
+                    const validOwnership = getResidentValidOwnership(resident);
 
                     tr.innerHTML = `
                         <td class="px-2 py-2 whitespace-nowrap text-center">${resident.isCheckedIn ? '✔️' : '❌'}</td>
@@ -2935,6 +2997,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         <td class="px-2 py-2 whitespace-nowrap">${resident.householdCount || 1}</td>
                         <td class="px-2 py-2 whitespace-nowrap">${resident.ownership || 0}%</td>
                         <td class="px-2 py-2"><div id="qr-${resident.id}" class="mx-auto"></div></td>
+                        <td class="px-2 py-2 whitespace-nowrap text-center font-semibold text-red-600">${validVotes}</td>
+                        <td class="px-2 py-2 whitespace-nowrap text-center font-semibold text-orange-600">${validOwnership.toFixed(4)}%</td>
                     `;
                     tbody.appendChild(tr);
                     new QRCode(document.getElementById(`qr-${resident.id}`), { text: qrValue, width: 48, height: 48 });
@@ -2943,7 +3007,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 if (allResidentsForSelectedEvent.length > currentRenderLimit) {
                     const loadMoreRow = document.createElement('tr');
                     loadMoreRow.innerHTML = `
-                        <td colspan="12" class="p-4 text-center">
+                        <td colspan="14" class="p-4 text-center">
                             <button id="load-more-residents-btn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 shadow">
                                 載入更多住戶 (還有 ${allResidentsForSelectedEvent.length - currentRenderLimit} 筆)
                             </button>
@@ -2964,6 +3028,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         renderAllResidents(tbody);
                     });
                 }
+
+                updateResidentsListFooter();
             }
 
             function updateResidentRow(resident, index) {
@@ -2995,6 +3061,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 tr.children[8].textContent = resident.area || 0;
                 tr.children[9].textContent = resident.householdCount || 1;
                 tr.children[10].textContent = `${resident.ownership || 0}%`;
+                tr.children[12].textContent = getResidentValidVotes(resident);
+                tr.children[13].textContent = `${getResidentValidOwnership(resident).toFixed(4)}%`;
                 
                 // Regenerate QR Code (fast for single row)
                 const qrContainer = tr.children[11].querySelector('div');
@@ -3002,6 +3070,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     qrContainer.innerHTML = '';
                     new QRCode(qrContainer, { text: resident.qrcodeValue || resident.id, width: 48, height: 48 });
                 }
+
+                updateResidentsListFooter();
             }
 
             function listenToResidents(eventId) {
@@ -3087,43 +3157,56 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const quorumMessage = document.getElementById('quorum-message');
                 const quorumPersonMessage = document.getElementById('quorum-person-message');
 
-                let checkedInCount = 0; // 人數（保留不再用於展示）
+                let checkedInCount = 0;
                 let recentCheckIns = [];
                 let totalOwnership = 0;
+                let totalValidOwnership = 0;
                 let checkedInOwnership = 0;
+                let checkedInValidOwnership = 0;
                 let totalHouseholds = 0;
-                let checkedInHouseholds = 0;
+                let totalValidVotes = 0;
+                let checkedInValidVotes = 0;
 
                 allResidentsForSelectedEvent.forEach(resident => {
                     const ownershipValue = parseFloat(resident.ownership) || 0;
+                    const validOwnershipValue = getResidentValidOwnership(resident);
                     const hc = parseInt(resident.householdCount, 10) || 1;
+                    const vv = getResidentValidVotes(resident);
                     totalOwnership += ownershipValue;
+                    totalValidOwnership += validOwnershipValue;
                     totalHouseholds += hc;
+                    totalValidVotes += vv;
                     if (resident.isCheckedIn) {
                         checkedInCount++;
-                        checkedInHouseholds += hc;
+                        checkedInValidVotes += vv;
                         checkedInOwnership += ownershipValue;
+                        checkedInValidOwnership += validOwnershipValue;
                         recentCheckIns.push(resident);
                     }
                 });
 
                 document.getElementById('total-residents').textContent = totalHouseholds;
-                document.getElementById('checked-in-count').textContent = checkedInHouseholds;
-                document.getElementById('scanner-checked-in').textContent = checkedInHouseholds;
-                document.getElementById('scanner-total').textContent = totalHouseholds;
+                document.getElementById('checked-in-count').textContent = checkedInValidVotes;
+                document.getElementById('scanner-checked-in').textContent = checkedInValidVotes;
+                document.getElementById('scanner-total').textContent = totalValidVotes;
 
-                const personRate = totalHouseholds > 0 ? ((checkedInHouseholds / totalHouseholds) * 100).toFixed(2) : 0;
+                const personRate = totalValidVotes > 0 ? ((checkedInValidVotes / totalValidVotes) * 100).toFixed(2) : 0;
                 document.getElementById('check-in-rate').textContent = `${personRate}%`;
 
-                const ownershipRate = (checkedInOwnership).toFixed(2);
+                const ownershipRate = (checkedInValidOwnership).toFixed(2);
                 document.getElementById('ownership-check-in-rate').textContent = `${ownershipRate}%`;
 
                 const targetHouseholds = Math.ceil(totalHouseholds * (parseFloat(currentPersonQuorumRatio) || 0) / 100);
-                const isReached = checkedInHouseholds >= targetHouseholds;
+                const targetValidVotes = Math.ceil(totalValidVotes * (parseFloat(currentPersonQuorumRatio) || 0) / 100);
+                const targetValidOwnership = parseFloat((totalValidOwnership * (parseFloat(currentQuorumRatio) || 0) / 100).toFixed(4));
+                const isReached = checkedInValidVotes >= targetValidVotes;
                 const reachedText = isReached ? ' (已到達)' : '';
                 const colorClass = isReached ? 'text-green-600' : 'text-red-600';
-                document.getElementById('person-ratio-target').innerHTML = `(目標: ${currentPersonQuorumRatio}%／目標戶數: ${targetHouseholds} | 報到戶數: <span class="${colorClass}">${checkedInHouseholds}${reachedText}</span>)`;
-                document.getElementById('ownership-ratio-target').textContent = `(目標: ${currentQuorumRatio}%)`;
+                const isOwnershipReached = checkedInValidOwnership >= targetValidOwnership;
+                const ownershipReachedText = isOwnershipReached ? ' (已到達)' : '';
+                const ownershipColorClass = isOwnershipReached ? 'text-green-600' : 'text-red-600';
+                document.getElementById('person-ratio-target').innerHTML = `(目標: ${currentPersonQuorumRatio}%／目標戶數: ${targetHouseholds}／目標有效票數: ${targetValidVotes} | 報到有效票數: <span class="${colorClass}">${checkedInValidVotes}${reachedText}</span>)`;
+                document.getElementById('ownership-ratio-target').innerHTML = `(目標: ${currentQuorumRatio}%／目標區分權: ${targetValidOwnership.toFixed(2)}% | 報到有效區分權: <span class="${ownershipColorClass}">${checkedInValidOwnership.toFixed(2)}%${ownershipReachedText}</span>)`;
 
 
                 if (currentPersonQuorumRatio > 0 && personRate >= currentPersonQuorumRatio) {
@@ -3177,6 +3260,16 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     const residentsById = {};
                     const allResidents = Array.isArray(allResidentsForSelectedEvent) ? allResidentsForSelectedEvent : [];
                     allResidents.forEach(r => { residentsById[r.id] = r; });
+                    const getVV = (r) => {
+                        const vv = parseInt(r?.validVotes, 10);
+                        if (!isNaN(vv) && vv > 0) return vv;
+                        return parseInt(r?.householdCount, 10) || 1;
+                    };
+                    const getVO = (r) => {
+                        const vo = parseFloat(r?.validOwnership);
+                        if (!isNaN(vo) && vo >= 0) return vo;
+                        return parseFloat(r?.ownership) || 0;
+                    };
                     const checkedInResidents = allResidents.filter(r => r.isCheckedIn);
                     let html = '';
                     (Array.isArray(currentTopics) ? currentTopics : []).forEach((t, idx) => {
@@ -3184,6 +3277,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         const eligibleResidentIdSet = new Set(eligibleResidents.map(r => r.id));
                         const eligibleCount = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
                         const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
+                        const eligibleValidOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + getVO(r), 0);
                         const tvotes = votes.filter(v => v.topicId === t.id);
                         // 以「住戶」為單位去重，同一住戶同一選項只計一次
                         // 建立 residentId -> Set<optionIndex> 的映射
@@ -3192,18 +3286,18 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             if (!selectionByResident.has(v.residentId)) selectionByResident.set(v.residentId, new Set());
                             selectionByResident.get(v.residentId).add(v.optionIndex);
                         });
-                        const votedEligibleHouseholds = eligibleResidents.reduce((sum, r) => selectionByResident.has(r.id) ? sum + (parseInt(r.householdCount, 10) || 1) : sum, 0);
-                        const notVotedEligibleHouseholds = Math.max(eligibleCount - votedEligibleHouseholds, 0);
-                        const notVotedOwnershipSum = eligibleResidents.reduce((sum, r) => !selectionByResident.has(r.id) ? sum + (parseFloat(r.ownership) || 0) : sum, 0);
+                        const votedEligibleVotes = eligibleResidents.reduce((sum, r) => selectionByResident.has(r.id) ? sum + getVV(r) : sum, 0);
+                        const totalEligibleVotes = eligibleResidents.reduce((sum, r) => sum + getVV(r), 0);
+                        const notVotedEligibleVotes = Math.max(totalEligibleVotes - votedEligibleVotes, 0);
+                        const notVotedOwnershipSum = eligibleResidents.reduce((sum, r) => !selectionByResident.has(r.id) ? sum + getVO(r) : sum, 0);
                         const optionStats = (Array.isArray(t.options) ? t.options : []).map((opt, optIdx) => {
                             let count = 0;
                             let ownershipSum = 0;
                             selectionByResident.forEach((set, rid) => {
                                 if (set.has(optIdx) && eligibleResidentIdSet.has(rid)) {
                                     const rr = residentsById[rid];
-                                    const hc = parseInt(rr?.householdCount, 10) || 1;
-                                    count += hc;
-                                    ownershipSum += parseFloat(rr?.ownership) || 0;
+                                    count += getVV(rr);
+                                    ownershipSum += getVO(rr);
                                 }
                             });
                             return { label: opt.label || `選項${optIdx + 1}`, count, ownership: ownershipSum };
@@ -3211,8 +3305,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         const countThreshold = parseFloat(t.passCountThresholdPercent ?? 50);
                         const ownershipThreshold = parseFloat(t.passOwnershipThresholdPercent ?? 50);
                         const optsHtml = optionStats.map(s => {
-                            const countRatio = eligibleCount > 0 ? (s.count / eligibleCount) * 100 : 0;
-                            const ownershipRatio = eligibleOwnershipTotal > 0 ? (s.ownership / eligibleOwnershipTotal) * 100 : 0;
+                            const countRatio = totalEligibleVotes > 0 ? (s.count / totalEligibleVotes) * 100 : 0;
+                            const ownershipRatio = eligibleValidOwnershipTotal > 0 ? (s.ownership / eligibleValidOwnershipTotal) * 100 : 0;
                             const meetsBoth = countRatio >= countThreshold && ownershipRatio >= ownershipThreshold;
                             const meetsEither = !meetsBoth && (countRatio >= countThreshold || ownershipRatio >= ownershipThreshold);
                             const highlight = meetsBoth ? 'border-2 border-green-500' : (meetsEither ? 'border-2 border-yellow-500' : 'border border-gray-200');
@@ -3226,12 +3320,12 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         }).join('');
                         
                         // Add "Not Voted" block
-                        const notVotedCountRatio = eligibleCount > 0 ? (notVotedEligibleHouseholds / eligibleCount) * 100 : 0;
-                        const notVotedOwnershipRatio = eligibleOwnershipTotal > 0 ? (notVotedOwnershipSum / eligibleOwnershipTotal) * 100 : 0;
+                        const notVotedCountRatio = totalEligibleVotes > 0 ? (notVotedEligibleVotes / totalEligibleVotes) * 100 : 0;
+                        const notVotedOwnershipRatio = eligibleValidOwnershipTotal > 0 ? (notVotedOwnershipSum / eligibleValidOwnershipTotal) * 100 : 0;
                         const notVotedHtml = `
                             <div class="border border-gray-200 rounded-md p-3 bg-gray-50">
                                 <div class="font-semibold text-gray-600">未投票</div>
-                                <div class="text-sm text-gray-600">票數：${notVotedEligibleHouseholds}（${notVotedCountRatio.toFixed(2)}%）</div>
+                                <div class="text-sm text-gray-600">票數：${notVotedEligibleVotes}（${notVotedCountRatio.toFixed(2)}%）</div>
                                 <div class="text-sm text-gray-600">區分權比例：${notVotedOwnershipRatio.toFixed(2)}%</div>
                             </div>
                         `;
@@ -3241,7 +3335,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                                 <div class="flex items-center justify-between">
                                     <div class="font-semibold">${getTopicDisplayName(t, idx)}：${t.title || ''}</div>
                                     <div class="flex items-center gap-2">
-                                        <div class="text-sm text-gray-600">應投票戶數：${eligibleCount}｜已投票：${votedEligibleHouseholds}｜未投票：${notVotedEligibleHouseholds}</div>
+                                        <div class="text-sm text-gray-600">應投票戶數：${eligibleCount}｜已投票(有效票數)：${votedEligibleVotes}｜未投票(有效票數)：${notVotedEligibleVotes}</div>
                                         <button class="view-topic-votes-btn px-2 py-1 text-xs sm:text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700" data-topic-id="${t.id}" data-topic-idx="${idx}">查看投票明細</button>
                                         <button class="end-topic-btn px-2 py-1 text-xs sm:text-sm bg-red-600 text-white rounded-md hover:bg-red-700" data-topic-id="${t.id}">投票結束</button>
                                     </div>
@@ -4387,12 +4481,14 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     showCustomAlert('沒有住戶資料可匯出。');
                     return;
                 }
-                const headers = ['qrcodeValue', 'unit', 'name', 'address', 'area', 'ownership', 'householdCount'];
+                const headers = ['qrcodeValue', 'unit', 'name', 'address', 'area', 'ownership', 'householdCount', 'validVotes', 'validOwnership'];
                 let csvContent = '\uFEFF' + headers.join(',') + '\n';
                 
                 allResidentsForSelectedEvent.forEach(resident => {
                     const row = headers.map(header => {
                         if (header === 'householdCount') return `"${parseInt(resident.householdCount, 10) || 1}"`;
+                        if (header === 'validVotes') return `"${getResidentValidVotes(resident)}"`;
+                        if (header === 'validOwnership') return `"${getResidentValidOwnership(resident)}"`;
                         return `"${resident[header] || ''}"`;
                     });
                     csvContent += row.join(',') + '\n';
@@ -4443,6 +4539,12 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         headers.forEach((header, index) => {
                             residentData[header] = values[index] || '';
                         });
+                        const householdCount = parseInt(residentData.householdCount, 10) || 1;
+                        const validVotesRaw = parseInt(residentData.validVotes, 10);
+                        const validVotes = (!isNaN(validVotesRaw) && validVotesRaw > 0) ? validVotesRaw : householdCount;
+                        const ownership = parseFloat(residentData.ownership) || 0;
+                        const validOwnershipRaw = parseFloat(residentData.validOwnership);
+                        const validOwnership = (!isNaN(validOwnershipRaw) && validOwnershipRaw >= 0) ? validOwnershipRaw : ownership;
 
                         const newResidentRef = doc(collection(db, ...residentsCollectionPath(selectedEventId)));
                         batch.set(newResidentRef, {
@@ -4451,8 +4553,10 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             name: residentData.name || '',
                             address: residentData.address || '',
                             area: parseFloat(residentData.area) || 0,
-                            ownership: parseFloat(residentData.ownership) || 0,
-                            householdCount: parseInt(residentData.householdCount, 10) || 1,
+                            ownership,
+                            householdCount,
+                            validVotes,
+                            validOwnership,
                             isCheckedIn: false,
                             checkInTimestamp: null,
                             createdAt: importTimestamp + i
@@ -5077,6 +5181,20 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const baseResidents = [...residentsData].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
                 const serialById = {};
                 baseResidents.forEach((r, i) => { serialById[r.id] = i + 1; });
+                const getVV = (r) => {
+                    const vv = parseInt(r?.validVotes, 10);
+                    if (!isNaN(vv) && vv > 0) return vv;
+                    return parseInt(r?.householdCount, 10) || 1;
+                };
+                const getVO = (r) => {
+                    const vo = parseFloat(r?.validOwnership);
+                    if (!isNaN(vo) && vo >= 0) return vo;
+                    return parseFloat(r?.ownership) || 0;
+                };
+                const sumHH = (arr) => arr.reduce((s, r) => s + (parseInt(r.householdCount, 10) || 1), 0);
+                const sumVV = (arr) => arr.reduce((s, r) => s + getVV(r), 0);
+                const sumVO = (arr) => arr.reduce((s, r) => s + getVO(r), 0);
+                const checkedFilter = (r) => r.checkInStatus === '已報到' || r.isCheckedIn;
                 const compareByUnit = (a, b) => {
                     const ua = String(a.unit || '');
                     const ub = String(b.unit || '');
@@ -5087,21 +5205,30 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 };
                 if (publicCheckinSortMode === 'status-unchecked-first') {
                     sortedResidents.sort((a, b) => {
-                        const aChecked = a.checkInStatus === '已報到' || a.isCheckedIn;
-                        const bChecked = b.checkInStatus === '已報到' || b.isCheckedIn;
+                        const aChecked = checkedFilter(a);
+                        const bChecked = checkedFilter(b);
                         if (aChecked !== bChecked) return aChecked ? 1 : -1;
                         return compareByUnit(a, b);
                     });
                 } else if (publicCheckinSortMode === 'status-checked-first') {
                     sortedResidents.sort((a, b) => {
-                        const aChecked = a.checkInStatus === '已報到' || a.isCheckedIn;
-                        const bChecked = b.checkInStatus === '已報到' || b.isCheckedIn;
+                        const aChecked = checkedFilter(a);
+                        const bChecked = checkedFilter(b);
                         if (aChecked !== bChecked) return aChecked ? -1 : 1;
                         return compareByUnit(a, b);
                     });
                 } else {
                     sortedResidents.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
                 }
+
+                const totalHH = sumHH(sortedResidents);
+                const totalOwnership = sumVO(sortedResidents);
+                const checkedArr = sortedResidents.filter(checkedFilter);
+                const checkedVV = sumVV(checkedArr);
+                const totalVV = sumVV(sortedResidents);
+                const checkedVO = sumVO(checkedArr);
+                const uncheckedVV = Math.max(totalVV - checkedVV, 0);
+                const uncheckedVO = Math.max(totalOwnership - checkedVO, 0);
 
                 const tableHtml = `
                     <div class="bg-white rounded-xl shadow-md overflow-hidden flex flex-col flex-grow">
@@ -5118,7 +5245,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                                 </thead>
                                 <tbody id="checkin-details-tbody" class="bg-white divide-y divide-gray-200">
                                     ${sortedResidents.length > 0 ? sortedResidents.map((r, index) => {
-                                        const isCheckedIn = r.checkInStatus === '已報到' || r.isCheckedIn;
+                                        const isCheckedIn = checkedFilter(r);
                                         const statusClass = isCheckedIn ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800';
                                         const statusText = isCheckedIn ? '已報到' : '未報到';
                                         
@@ -5164,10 +5291,12 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             </table>
                         </div>
                         <div class="bg-gray-50 px-6 py-3 border-t border-gray-200 text-sm text-gray-500 flex justify-between items-center">
-                            <span>總戶數: ${sortedResidents.length}</span>
+                            <span>總戶數: ${totalHH}</span>
                             <div class="flex gap-4">
-                                <span>已報到: ${sortedResidents.filter(r => r.checkInStatus === '已報到' || r.isCheckedIn).length}</span>
-                                <span>未報到: ${sortedResidents.length - sortedResidents.filter(r => r.checkInStatus === '已報到' || r.isCheckedIn).length}</span>
+                                <span>已報到有效票數: ${checkedVV}</span>
+                                <span>未報到有效票數: ${uncheckedVV}</span>
+                                <span>已報到有效區分權: ${checkedVO.toFixed(2)}%</span>
+                                <span>未報到有效區分權: ${uncheckedVO.toFixed(2)}%</span>
                             </div>
                         </div>
                     </div>
@@ -5243,9 +5372,11 @@ const topicCells = currentTopics.map((t, tIdx) => {
                                 <p>列印日期: ${dateStr}</p>
                             </div>
                             <div class="bg-gray-50 px-6 py-3 border-b border-gray-200 text-sm text-gray-500 flex justify-between items-center mb-4">
-                                <span>總戶數: ${sortedResidents.length}</span>
-                                <span style="margin-left: 20px;">已報到: ${sortedResidents.filter(r => r.checkInStatus === '已報到' || r.isCheckedIn).length}</span>
-                                <span style="margin-left: 20px;">未報到: ${sortedResidents.length - sortedResidents.filter(r => r.checkInStatus === '已報到' || r.isCheckedIn).length}</span>
+                                <span>總戶數: ${totalHH}</span>
+                                <span style="margin-left: 20px;">已報到有效票數: ${checkedVV}</span>
+                                <span style="margin-left: 20px;">未報到有效票數: ${uncheckedVV}</span>
+                                <span style="margin-left: 20px;">已報到有效區分權: ${checkedVO.toFixed(2)}%</span>
+                                <span style="margin-left: 20px;">未報到有效區分權: ${uncheckedVO.toFixed(2)}%</span>
                             </div>
                             <table class="print-table">
                                 <thead>
@@ -5326,11 +5457,26 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 if (voteBtn) voteBtn.addEventListener('click', (e) => { e.preventDefault(); updatePublicUrlAndTarget('vote'); renderPublicVoteDashboard(eventData, residentsData); });
 
                 let checkedInOwnership = 0;
+                let totalValidOwnership = 0;
+                let checkedInValidOwnership = 0;
+                let totalValidVotes = 0;
+                let checkedInValidVotes = 0;
                 const totalHouseholds = residentsData.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
                 const checkedInHouseholds = residentsData.reduce((sum, r) => r.isCheckedIn ? sum + (parseInt(r.householdCount, 10) || 1) : sum, 0);
-                residentsData.forEach(r => { if (r.isCheckedIn) { checkedInOwnership += parseFloat(r.ownership) || 0; } });
-                const personRate = totalHouseholds > 0 ? parseFloat(((checkedInHouseholds / totalHouseholds) * 100).toFixed(2)) : 0;
-                const ownershipRate = parseFloat(checkedInOwnership.toFixed(2));
+                residentsData.forEach(r => {
+                    const ownershipVal = parseFloat(r.ownership) || 0;
+                    const validOwnershipVal = (parseFloat(r?.validOwnership) >= 0 && !isNaN(parseFloat(r?.validOwnership))) ? parseFloat(r.validOwnership) : ownershipVal;
+                    const vvVal = (parseInt(r?.validVotes, 10) > 0 && !isNaN(parseInt(r?.validVotes, 10))) ? parseInt(r.validVotes, 10) : (parseInt(r.householdCount, 10) || 1);
+                    totalValidOwnership += validOwnershipVal;
+                    totalValidVotes += vvVal;
+                    if (r.isCheckedIn) {
+                        checkedInOwnership += ownershipVal;
+                        checkedInValidOwnership += validOwnershipVal;
+                        checkedInValidVotes += vvVal;
+                    }
+                });
+                const personRate = totalValidVotes > 0 ? parseFloat(((checkedInValidVotes / totalValidVotes) * 100).toFixed(2)) : 0;
+                const ownershipRate = parseFloat(checkedInValidOwnership.toFixed(2));
                 
                 const personQuorumRatio = parseFloat(eventData.personRatio) || 0;
                 const ownershipQuorumRatio = parseFloat(eventData.ownershipRatio) || 0;
@@ -5339,9 +5485,14 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const ownershipQuorumReached = ownershipQuorumRatio > 0 && ownershipRate >= ownershipQuorumRatio;
 
                 const targetHouseholdsVal = Math.ceil(totalHouseholds * (parseFloat(personQuorumRatio) || 0) / 100);
-                const isReachedVal = checkedInHouseholds >= targetHouseholdsVal;
+                const targetValidVotesVal = Math.ceil(totalValidVotes * (parseFloat(personQuorumRatio) || 0) / 100);
+                const targetValidOwnershipVal = parseFloat((totalValidOwnership * (parseFloat(ownershipQuorumRatio) || 0) / 100).toFixed(4));
+                const isReachedVal = checkedInValidVotes >= targetValidVotesVal;
                 const reachedTextVal = isReachedVal ? ' (已到達)' : '';
                 const colorClassVal = isReachedVal ? 'text-green-600' : 'text-red-600';
+                const isOwnershipReachedVal = checkedInValidOwnership >= targetValidOwnershipVal;
+                const ownershipReachedTextVal = isOwnershipReachedVal ? ' (已到達)' : '';
+                const ownershipColorClassVal = isOwnershipReachedVal ? 'text-green-600' : 'text-red-600';
 
                 publicDashboardContent.innerHTML = `
                     <div class="bg-white px-6 py-6 rounded-xl shadow-md flex flex-col items-start justify-center h-full text-left">
@@ -5358,14 +5509,14 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     </div>
                     <div class="bg-white px-6 py-6 rounded-xl shadow-md flex flex-col items-start justify-center h-full text-left">
                          <div>
-                             <p class="text-2xl font-medium text-gray-500">戶數報到率 <span class="text-xs">(目標: ${personQuorumRatio}%／目標戶數: ${targetHouseholdsVal} | 報到戶數: <span class="${colorClassVal}">${checkedInHouseholds}${reachedTextVal}</span>)</span></p>
+                             <p class="text-2xl font-medium text-gray-500">戶數報到率 <span class="text-xs">(目標: ${personQuorumRatio}%／目標戶數: ${targetHouseholdsVal}／目標有效票數: ${targetValidVotesVal} | 報到有效票數: <span class="${colorClassVal}">${checkedInValidVotes}${reachedTextVal}</span>)</span></p>
                              <p class="text-5xl font-bold text-orange-600">${personRate}%</p>
                          </div>
                         <span class="${personQuorumReached ? '' : 'hidden'} text-green-600 font-bold text-lg mt-2">已達法定開會人數</span>
                     </div>
                     <div class="bg-white px-6 py-6 rounded-xl shadow-md flex flex-col items-start justify-center h-full text-left">
                          <div>
-                             <p class="text-2xl font-medium text-gray-500">區分權報到率 <span class="text-xs">(目標: ${ownershipQuorumRatio}%)</span></p>
+                             <p class="text-2xl font-medium text-gray-500">區分權報到率 <span class="text-xs">(目標: ${ownershipQuorumRatio}%／目標區分權: ${targetValidOwnershipVal.toFixed(2)}% | 報到有效區分權: <span class="${ownershipColorClassVal}">${checkedInValidOwnership.toFixed(2)}%${ownershipReachedTextVal}</span>)</span></p>
                              <p class="text-5xl font-bold text-blue-600">${ownershipRate}%</p>
                          </div>
                         <span class="${ownershipQuorumReached ? '' : 'hidden'} text-green-600 font-bold text-lg mt-2">已達法定開會區分權比例</span>
@@ -5388,6 +5539,16 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const allResidents = Array.isArray(residentsData) ? residentsData : [];
                 allResidents.forEach(r => { residentsById[r.id] = r; });
                 const checkedInResidents = allResidents.filter(r => r.isCheckedIn);
+                const getVVPublic = (r) => {
+                    const vv = parseInt(r?.validVotes, 10);
+                    if (!isNaN(vv) && vv > 0) return vv;
+                    return parseInt(r?.householdCount, 10) || 1;
+                };
+                const getVOPublic = (r) => {
+                    const vo = parseFloat(r?.validOwnership);
+                    if (!isNaN(vo) && vo >= 0) return vo;
+                    return parseFloat(r?.ownership) || 0;
+                };
 
                 function getTopicDisplayNamePublic(topic, idx) {
                     const prefix = topic?.labelPrefix || '議題';
@@ -5428,24 +5589,25 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     const eligibleResidentIdSet = new Set(eligibleResidents.map(r => r.id));
                     const eligibleCount = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
                     const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
+                    const eligibleValidOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + getVOPublic(r), 0);
                     const tvotes = votes.filter(v => v.topicId === t.id);
                     const selectionByResident = new Map();
                     tvotes.forEach(v => {
                         if (!selectionByResident.has(v.residentId)) selectionByResident.set(v.residentId, new Set());
                         selectionByResident.get(v.residentId).add(v.optionIndex);
                     });
-                    const votedEligibleHouseholds = eligibleResidents.reduce((sum, r) => selectionByResident.has(r.id) ? sum + (parseInt(r.householdCount, 10) || 1) : sum, 0);
-                    const notVotedEligibleHouseholds = Math.max(eligibleCount - votedEligibleHouseholds, 0);
-                    const notVotedOwnershipSum = eligibleResidents.reduce((sum, r) => !selectionByResident.has(r.id) ? sum + (parseFloat(r.ownership) || 0) : sum, 0);
+                    const totalEligibleVotes = eligibleResidents.reduce((sum, r) => sum + getVVPublic(r), 0);
+                    const votedEligibleVotes = eligibleResidents.reduce((sum, r) => selectionByResident.has(r.id) ? sum + getVVPublic(r) : sum, 0);
+                    const notVotedEligibleVotes = Math.max(totalEligibleVotes - votedEligibleVotes, 0);
+                    const notVotedOwnershipSum = eligibleResidents.reduce((sum, r) => !selectionByResident.has(r.id) ? sum + getVOPublic(r) : sum, 0);
                     const optionStats = (Array.isArray(t.options) ? t.options : []).map((opt, optIdx) => {
                         let count = 0;
                         let ownershipSum = 0;
                         selectionByResident.forEach((set, rid) => {
                             if (set.has(optIdx) && eligibleResidentIdSet.has(rid)) {
                                 const rr = residentsById[rid];
-                                const hc = parseInt(rr?.householdCount, 10) || 1;
-                                count += hc;
-                                ownershipSum += parseFloat(rr?.ownership) || 0;
+                                count += getVVPublic(rr);
+                                ownershipSum += getVOPublic(rr);
                             }
                         });
                         return { label: opt.label || `選項${optIdx + 1}`, count, ownership: ownershipSum };
@@ -5454,8 +5616,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     const ownershipThreshold = parseFloat(t.passOwnershipThresholdPercent ?? 50);
                     const columns = (optionStats.length || 1) + 1; // +1 for "Not Voted" block
                     const optsHtml = optionStats.map(s => {
-                        const countRatio = eligibleCount > 0 ? (s.count / eligibleCount) * 100 : 0;
-                        const ownershipRatio = eligibleOwnershipTotal > 0 ? (s.ownership / eligibleOwnershipTotal) * 100 : 0;
+                        const countRatio = totalEligibleVotes > 0 ? (s.count / totalEligibleVotes) * 100 : 0;
+                        const ownershipRatio = eligibleValidOwnershipTotal > 0 ? (s.ownership / eligibleValidOwnershipTotal) * 100 : 0;
                         const meetsBoth = countRatio >= countThreshold && ownershipRatio >= ownershipThreshold;
                         const meetsEither = !meetsBoth && (countRatio >= countThreshold || ownershipRatio >= ownershipThreshold);
                         const highlight = meetsBoth ? 'border-2 border-green-500' : (meetsEither ? 'border-2 border-yellow-500' : 'border border-gray-200');
@@ -5474,14 +5636,14 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         `;
                     }).join('');
                     
-                    const notVotedCountRatio = eligibleCount > 0 ? (notVotedEligibleHouseholds / eligibleCount) * 100 : 0;
-                    const notVotedOwnershipRatio = eligibleOwnershipTotal > 0 ? (notVotedOwnershipSum / eligibleOwnershipTotal) * 100 : 0;
+                    const notVotedCountRatio = totalEligibleVotes > 0 ? (notVotedEligibleVotes / totalEligibleVotes) * 100 : 0;
+                    const notVotedOwnershipRatio = eligibleValidOwnershipTotal > 0 ? (notVotedOwnershipSum / eligibleValidOwnershipTotal) * 100 : 0;
                     const notVotedHtml = `
                         <div class="border border-gray-200 rounded-md p-3 bg-gray-50">
                             <div class="font-semibold whitespace-nowrap text-xs sm:text-sm md:text-base lg:text-xl xl:text-2xl mb-2 text-gray-600">未投票</div>
                             <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl mb-1">
                                 <div class="whitespace-nowrap">投票戶數：</div>
-                                <div class="whitespace-nowrap font-bold text-gray-600">${notVotedEligibleHouseholds}（${notVotedCountRatio.toFixed(2)}%）</div>
+                                <div class="whitespace-nowrap font-bold text-gray-600">${notVotedEligibleVotes}（${notVotedCountRatio.toFixed(2)}%）</div>
                             </div>
                             <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl">
                                 <div class="whitespace-nowrap">區分權比例：</div>
@@ -5501,9 +5663,9 @@ const topicCells = currentTopics.map((t, tIdx) => {
                             <div class="text-gray-600 whitespace-nowrap text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl">
                                 <div>已報到應投票戶數：<span class="font-bold text-blue-600">${eligibleCount}</span></div>
                                 <div class="mt-1">
-                                    <span>已投票：<span class="font-bold text-blue-600">${votedEligibleHouseholds}</span></span>
+                                    <span>已投票(有效票數)：<span class="font-bold text-blue-600">${votedEligibleVotes}</span></span>
                                     <span class="mx-2">｜</span>
-                                    <span>未投票：<span class="font-bold text-blue-600">${notVotedEligibleHouseholds}</span></span>
+                                    <span>未投票(有效票數)：<span class="font-bold text-blue-600">${notVotedEligibleVotes}</span></span>
                                 </div>
                             </div>
                             <div class="grid gap-3 mt-3" style="grid-template-columns: repeat(${columns}, minmax(0, 1fr));">
@@ -5527,23 +5689,24 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         const eligibleResidentIdSet = new Set(eligibleResidents.map(r => r.id));
                         const eligibleCount = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
                         const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
+                        const eligibleValidOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + getVOPublic(r), 0);
                         const tvotes = votes.filter(v => v.topicId === t.id);
                         const selectionByResident = new Map();
                         tvotes.forEach(v => {
                             if (!selectionByResident.has(v.residentId)) selectionByResident.set(v.residentId, new Set());
                             selectionByResident.get(v.residentId).add(v.optionIndex);
                         });
-                        const votedEligibleHouseholds = eligibleResidents.reduce((sum, r) => selectionByResident.has(r.id) ? sum + (parseInt(r.householdCount, 10) || 1) : sum, 0);
-                        const notVotedEligibleHouseholds = Math.max(eligibleCount - votedEligibleHouseholds, 0);
+                        const totalEligibleVotes = eligibleResidents.reduce((sum, r) => sum + getVVPublic(r), 0);
+                        const votedEligibleVotes = eligibleResidents.reduce((sum, r) => selectionByResident.has(r.id) ? sum + getVVPublic(r) : sum, 0);
+                        const notVotedEligibleVotes = Math.max(totalEligibleVotes - votedEligibleVotes, 0);
                         const optionStats = (Array.isArray(t.options) ? t.options : []).map((opt, optIdx) => {
                             let count = 0;
                             let ownershipSum = 0;
                             selectionByResident.forEach((set, rid) => {
                                 if (set.has(optIdx) && eligibleResidentIdSet.has(rid)) {
                                     const rr = residentsById[rid];
-                                    const hc = parseInt(rr?.householdCount, 10) || 1;
-                                    count += hc;
-                                    ownershipSum += parseFloat(rr?.ownership) || 0;
+                                    count += getVVPublic(rr);
+                                    ownershipSum += getVOPublic(rr);
                                 }
                             });
                             return { label: opt.label || `選項${optIdx + 1}`, count, ownership: ownershipSum };
@@ -5551,8 +5714,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         const countThreshold = parseFloat(t.passCountThresholdPercent ?? 50);
                         const ownershipThreshold = parseFloat(t.passOwnershipThresholdPercent ?? 50);
                         const optsHtml = optionStats.map(s => {
-                            const countRatio = eligibleCount > 0 ? (s.count / eligibleCount) * 100 : 0;
-                            const ownershipRatio = eligibleOwnershipTotal > 0 ? (s.ownership / eligibleOwnershipTotal) * 100 : 0;
+                            const countRatio = totalEligibleVotes > 0 ? (s.count / totalEligibleVotes) * 100 : 0;
+                            const ownershipRatio = eligibleValidOwnershipTotal > 0 ? (s.ownership / eligibleValidOwnershipTotal) * 100 : 0;
                             const meetsBoth = countRatio >= countThreshold && ownershipRatio >= ownershipThreshold;
                             const meetsEither = !meetsBoth && (countRatio >= countThreshold || ownershipRatio >= ownershipThreshold);
                             const highlight = meetsBoth ? 'border-2 border-green-500' : (meetsEither ? 'border-2 border-yellow-500' : 'border border-gray-200');
@@ -5582,9 +5745,9 @@ const topicCells = currentTopics.map((t, tIdx) => {
                                         <div class="text-gray-600 whitespace-nowrap text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl text-right">
                                             <div>已報到應投票戶數：<span class="font-bold text-blue-600">${eligibleCount}</span></div>
                                             <div class="mt-1">
-                                                <span>已投票：<span class="font-bold text-blue-600">${votedEligibleHouseholds}</span></span>
+                                                <span>已投票(有效票數)：<span class="font-bold text-blue-600">${votedEligibleVotes}</span></span>
                                                 <span class="mx-2">｜</span>
-                                                <span>未投票：<span class="font-bold text-blue-600">${notVotedEligibleHouseholds}</span></span>
+                                                <span>未投票(有效票數)：<span class="font-bold text-blue-600">${notVotedEligibleVotes}</span></span>
                                             </div>
                                         </div>
                                     </div>
