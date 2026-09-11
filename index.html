@@ -5556,31 +5556,101 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     return `${prefix}${serial}`;
                 }
 
+                function classifyOptionPublic(optLabel) {
+                    const s = (optLabel || '').toString().trim();
+                    if (/^(同意|贊成|是|yes|for|通過|同意票)$/i.test(s)) return 'agree';
+                    if (/^(不同意|反對|否|no|against|否決|不同意票)$/i.test(s)) return 'disagree';
+                    if (/^(廢票|棄權|棄票|廢|invalid|abstain|spoiled|null|void)$/i.test(s)) return 'invalid';
+                    return 'other';
+                }
+
+                function aggregateTopicStatsPublic(topic, eligibleResidentsArr, eligibleResidentIdSet, eligibleValidOwnershipTotal, totalEligibleVotesSum, selectionMap, residentsIndex) {
+                    const opts = Array.isArray(topic.options) ? topic.options : [];
+                    const result = {
+                        agree: { count: 0, ownership: 0 },
+                        disagree: { count: 0, ownership: 0 },
+                        invalid: { count: 0, ownership: 0 },
+                        notVoted: { count: 0, ownership: 0 }
+                    };
+                    selectionMap.forEach((set, rid) => {
+                        if (!eligibleResidentIdSet.has(rid)) return;
+                        const rr = residentsIndex[rid];
+                        if (!rr) return;
+                        const vv = getVVPublic(rr);
+                        const vo = getVOPublic(rr);
+                        if (set.size === 0) return;
+                        let classifiedThisResident = false;
+                        set.forEach(optIdx => {
+                            const optLabel = (opts[optIdx] && opts[optIdx].label) || '';
+                            const cls = classifyOptionPublic(optLabel);
+                            if (cls === 'agree') {
+                                result.agree.count += vv;
+                                result.agree.ownership += vo;
+                                classifiedThisResident = true;
+                            } else if (cls === 'disagree') {
+                                result.disagree.count += vv;
+                                result.disagree.ownership += vo;
+                                classifiedThisResident = true;
+                            } else if (cls === 'invalid') {
+                                result.invalid.count += vv;
+                                result.invalid.ownership += vo;
+                                classifiedThisResident = true;
+                            } else {
+                                result.invalid.count += vv;
+                                result.invalid.ownership += vo;
+                                classifiedThisResident = true;
+                            }
+                        });
+                    });
+                    eligibleResidentsArr.forEach(rr => {
+                        const rid = rr.id;
+                        const set = selectionMap.get(rid);
+                        if (!set || set.size === 0) {
+                            result.notVoted.count += getVVPublic(rr);
+                            result.notVoted.ownership += getVOPublic(rr);
+                        }
+                    });
+                    return result;
+                }
+
+                function renderCategoryCardPublic(label, data, totalVotes, totalOwnership, highlightClass, titleClass) {
+                    const countRatio = totalVotes > 0 ? (data.count / totalVotes) * 100 : 0;
+                    const ownershipRatio = totalOwnership > 0 ? (data.ownership / totalOwnership) * 100 : 0;
+                    return `
+                        <div class="${highlightClass} rounded-md p-3">
+                            <div class="font-semibold whitespace-nowrap text-xs sm:text-sm md:text-base lg:text-xl xl:text-2xl mb-2 ${titleClass || ''}">${label}</div>
+                            <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl mb-1">
+                                <div class="whitespace-nowrap">有效票數：</div>
+                                <div class="whitespace-nowrap font-bold text-blue-600">${data.count}（${countRatio.toFixed(2)}%）</div>
+                            </div>
+                            <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl">
+                                <div class="whitespace-nowrap">有效區分所有權比例：</div>
+                                <div class="whitespace-nowrap font-bold text-blue-600">${ownershipRatio.toFixed(2)}%</div>
+                            </div>
+                        </div>
+                    `;
+                }
+
                 if (topics.length === 0) {
                     publicControls.innerHTML = '';
                     publicDashboardContent.innerHTML = '<div class="text-gray-500 text-sm">尚未設定議題</div>';
                     return;
                 }
 
-                const mode = window.publicVoteViewMode === 'tabs' ? 'tabs' : 'list';
                 let html = '';
                 let controlsHtml = '';
+
+                const mode = window.publicVoteViewMode === 'tabs' ? 'tabs' : 'list';
 
                 if (mode === 'tabs') {
                     // Tabs mode: make content container full width (single column)
                     publicDashboardContent.className = 'grid grid-cols-1 gap-6 flex-grow overflow-y-auto min-h-0 pb-20 md:pb-0';
                     const selectedIdx = Math.min(Math.max(parseInt(window.publicTopicIndex || 0, 10), 0), topics.length - 1);
-                    const tabsHtml = topics.map((t, idx) => {
-                        const active = idx === selectedIdx ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700';
-                        return `<button class="public-topic-tab px-3 py-1 rounded-md text-sm ${active}" data-idx="${idx}">${getTopicDisplayNamePublic(t, idx)}</button>`;
-                    }).join(' ');
                     controlsHtml = `
-                        <div class="w-full space-y-2">
+                        <div class="w-full">
                             <div class="relative w-full h-9">
                                 <div class="absolute left-1/2 -translate-x-1/2">${toggleHtml}</div>
-                                <button id="toggle-public-view-mode" class="absolute right-0 px-2 py-1 text-xs sm:text-sm bg-gray-200 hover:bg-gray-300 rounded">切換為列表</button>
                             </div>
-                            <div class="flex flex-wrap justify-center gap-2">${tabsHtml}</div>
                         </div>
                     `;
 
@@ -5599,96 +5669,81 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     const totalEligibleVotes = eligibleResidents.reduce((sum, r) => sum + getVVPublic(r), 0);
                     const votedEligibleVotes = eligibleResidents.reduce((sum, r) => selectionByResident.has(r.id) ? sum + getVVPublic(r) : sum, 0);
                     const notVotedEligibleVotes = Math.max(totalEligibleVotes - votedEligibleVotes, 0);
-                    const notVotedOwnershipSum = eligibleResidents.reduce((sum, r) => !selectionByResident.has(r.id) ? sum + getVOPublic(r) : sum, 0);
-                    const optionStats = (Array.isArray(t.options) ? t.options : []).map((opt, optIdx) => {
-                        let count = 0;
-                        let ownershipSum = 0;
-                        selectionByResident.forEach((set, rid) => {
-                            if (set.has(optIdx) && eligibleResidentIdSet.has(rid)) {
-                                const rr = residentsById[rid];
-                                count += getVVPublic(rr);
-                                ownershipSum += getVOPublic(rr);
-                            }
-                        });
-                        return { label: opt.label || `選項${optIdx + 1}`, count, ownership: ownershipSum };
-                    });
                     const countThreshold = parseFloat(t.passCountThresholdPercent ?? 50);
                     const ownershipThreshold = parseFloat(t.passOwnershipThresholdPercent ?? 50);
-                    const columns = (optionStats.length || 1) + 1; // +1 for "Not Voted" block
-                    const optsHtml = optionStats.map(s => {
-                        const countRatio = totalEligibleVotes > 0 ? (s.count / totalEligibleVotes) * 100 : 0;
-                        const ownershipRatio = eligibleValidOwnershipTotal > 0 ? (s.ownership / eligibleValidOwnershipTotal) * 100 : 0;
-                        const meetsBoth = countRatio >= countThreshold && ownershipRatio >= ownershipThreshold;
-                        const meetsEither = !meetsBoth && (countRatio >= countThreshold || ownershipRatio >= ownershipThreshold);
-                        const highlight = meetsBoth ? 'border-2 border-green-500' : (meetsEither ? 'border-2 border-yellow-500' : 'border border-gray-200');
-                        return `
-                            <div class="${highlight} rounded-md p-3">
-                                <div class="font-semibold whitespace-nowrap text-xs sm:text-sm md:text-base lg:text-xl xl:text-2xl mb-2">${s.label}</div>
-                                <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl mb-1">
-                                    <div class="whitespace-nowrap">投票戶數：</div>
-                                    <div class="whitespace-nowrap font-bold text-blue-600">${s.count}（${countRatio.toFixed(2)}%）</div>
-                                </div>
-                                <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl">
-                                    <div class="whitespace-nowrap">區分權比例：</div>
-                                    <div class="whitespace-nowrap font-bold text-blue-600">${ownershipRatio.toFixed(2)}%</div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                    
-                    const notVotedCountRatio = totalEligibleVotes > 0 ? (notVotedEligibleVotes / totalEligibleVotes) * 100 : 0;
-                    const notVotedOwnershipRatio = eligibleValidOwnershipTotal > 0 ? (notVotedOwnershipSum / eligibleValidOwnershipTotal) * 100 : 0;
-                    const notVotedHtml = `
-                        <div class="border border-gray-200 rounded-md p-3 bg-gray-50">
-                            <div class="font-semibold whitespace-nowrap text-xs sm:text-sm md:text-base lg:text-xl xl:text-2xl mb-2 text-gray-600">未投票</div>
-                            <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl mb-1">
-                                <div class="whitespace-nowrap">投票戶數：</div>
-                                <div class="whitespace-nowrap font-bold text-gray-600">${notVotedEligibleVotes}（${notVotedCountRatio.toFixed(2)}%）</div>
-                            </div>
-                            <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl">
-                                <div class="whitespace-nowrap">區分權比例：</div>
-                                <div class="whitespace-nowrap font-bold text-gray-600">${notVotedOwnershipRatio.toFixed(2)}%</div>
-                            </div>
-                        </div>
-                    `;
+                    const aggregated = aggregateTopicStatsPublic(t, eligibleResidents, eligibleResidentIdSet, eligibleValidOwnershipTotal, totalEligibleVotes, selectionByResident, residentsById);
+                    const combinedInvalidNotVoted = {
+                        count: aggregated.invalid.count + aggregated.notVoted.count,
+                        ownership: aggregated.invalid.ownership + aggregated.notVoted.ownership
+                    };
+                    const agreeCountRatio = totalEligibleVotes > 0 ? (aggregated.agree.count / totalEligibleVotes) * 100 : 0;
+                    const agreeOwnershipRatio = eligibleValidOwnershipTotal > 0 ? (aggregated.agree.ownership / eligibleValidOwnershipTotal) * 100 : 0;
+                    const agreePassed = agreeCountRatio >= countThreshold && agreeOwnershipRatio >= ownershipThreshold;
+                    const agreeHighlight = agreePassed ? 'border-2 border-green-500' : 'border border-gray-200';
+                    const disagreeCountRatio = totalEligibleVotes > 0 ? (aggregated.disagree.count / totalEligibleVotes) * 100 : 0;
+                    const disagreeOwnershipRatio = eligibleValidOwnershipTotal > 0 ? (aggregated.disagree.ownership / eligibleValidOwnershipTotal) * 100 : 0;
+                    const disagreePassed = disagreeCountRatio >= countThreshold && disagreeOwnershipRatio >= ownershipThreshold;
+                    const disagreeHighlight = disagreePassed ? 'border-2 border-yellow-500' : 'border border-gray-200';
 
                     const proposerText = t?.proposer?.type === 'resident' ? `住戶(${t?.proposer?.unit || ''})` : '管委會';
                     const displayName = getTopicDisplayNamePublic(t, selectedIdx);
+                    const agreeCount = aggregated.agree.count;
+                    const agreeCR = totalEligibleVotes > 0 ? (agreeCount / totalEligibleVotes) * 100 : 0;
+                    const agreeOR = eligibleValidOwnershipTotal > 0 ? (aggregated.agree.ownership / eligibleValidOwnershipTotal) * 100 : 0;
+                    const disagreeCount = aggregated.disagree.count;
+                    const disagreeCR = totalEligibleVotes > 0 ? (disagreeCount / totalEligibleVotes) * 100 : 0;
+                    const disagreeOR = eligibleValidOwnershipTotal > 0 ? (aggregated.disagree.ownership / eligibleValidOwnershipTotal) * 100 : 0;
+                    const mixCount = combinedInvalidNotVoted.count;
+                    const mixCR = totalEligibleVotes > 0 ? (mixCount / totalEligibleVotes) * 100 : 0;
+                    const mixOR = eligibleValidOwnershipTotal > 0 ? (combinedInvalidNotVoted.ownership / eligibleValidOwnershipTotal) * 100 : 0;
                     html = `
-                        <div class="bg-white p-4 rounded-lg shadow-sm">
-                            <div class="font-semibold mb-2 whitespace-nowrap text-lg sm:text-xl md:text-2xl lg:text-3xl">${displayName}</div>
-                            <div class="text-gray-700 mb-1 whitespace-pre-wrap text-sm sm:text-base md:text-lg lg:text-xl"><span class="font-bold">主旨：</span>${t.title || ''}</div>
-                            <div class="text-gray-700 mb-1 whitespace-pre-wrap text-sm sm:text-base md:text-lg lg:text-xl"><span class="font-bold">說明：</span>${t.description || '-'}</div>
-                            <div class="text-gray-700 mb-3 whitespace-pre-wrap text-sm sm:text-base md:text-lg lg:text-xl"><span class="font-bold">提案人：</span>${proposerText}</div>
-                            <div class="text-gray-600 whitespace-nowrap text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl">
-                                <div>已報到應投票戶數：<span class="font-bold text-blue-600">${eligibleCount}</span></div>
-                                <div class="mt-1">
-                                    <span>已投票(有效票數)：<span class="font-bold text-blue-600">${votedEligibleVotes}</span></span>
-                                    <span class="mx-2">｜</span>
-                                    <span>未投票(有效票數)：<span class="font-bold text-blue-600">${notVotedEligibleVotes}</span></span>
-                                </div>
-                            </div>
-                            <div class="grid gap-3 mt-3" style="grid-template-columns: repeat(${columns}, minmax(0, 1fr));">
-                                ${optsHtml}
-                                ${notVotedHtml}
-                            </div>
+                        <div class="bg-white rounded-lg shadow-sm overflow-x-auto">
+                            <table class="min-w-full text-xs sm:text-sm">
+                                <thead class="bg-gray-100 text-gray-700">
+                                    <tr>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap border-b border-gray-200 sticky left-0 bg-gray-100 z-10">議題</th>
+                                        <th class="px-3 py-2 text-center whitespace-nowrap border-b border-gray-200">應投票戶數</th>
+                                        <th class="px-3 py-2 text-center whitespace-nowrap border-b border-gray-200 ${agreePassed ? 'bg-green-50' : ''}">同意<br><span class="text-[10px] font-normal text-gray-500">有效票數／區分權</span></th>
+                                        <th class="px-3 py-2 text-center whitespace-nowrap border-b border-gray-200">不同意<br><span class="text-[10px] font-normal text-gray-500">有效票數／區分權</span></th>
+                                        <th class="px-3 py-2 text-center whitespace-nowrap border-b border-gray-200">未投票、廢票<br><span class="text-[10px] font-normal text-gray-500">有效票數／區分權</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-3 py-3 border-b border-gray-100 whitespace-nowrap sticky left-0 bg-white z-[1]"><span class="font-bold text-sm sm:text-base md:text-lg">${displayName}</span></td>
+                                        <td class="px-3 py-3 border-b border-gray-100 text-center font-bold text-gray-800 whitespace-nowrap">${eligibleCount}<div class="text-[10px] sm:text-xs text-gray-500 mt-1">已投票 ${votedEligibleVotes}／未投票 ${notVotedEligibleVotes}</div></td>
+                                        <td class="px-3 py-3 border-b border-gray-100 text-center ${agreeHighlight.includes('green-500') ? 'bg-green-50' : ''}">
+                                            <div class="font-bold text-blue-600 whitespace-nowrap">${agreeCount}（${agreeCR.toFixed(2)}%）</div>
+                                            <div class="text-xs text-blue-500 mt-1 whitespace-nowrap">區分權 ${agreeOR.toFixed(2)}%</div>
+                                        </td>
+                                        <td class="px-3 py-3 border-b border-gray-100 text-center">
+                                            <div class="font-bold text-red-600 whitespace-nowrap">${disagreeCount}（${disagreeCR.toFixed(2)}%）</div>
+                                            <div class="text-xs text-red-500 mt-1 whitespace-nowrap">區分權 ${disagreeOR.toFixed(2)}%</div>
+                                        </td>
+                                        <td class="px-3 py-3 border-b border-gray-100 text-center bg-gray-50">
+                                            <div class="font-bold text-gray-700 whitespace-nowrap">${mixCount}（${mixCR.toFixed(2)}%）</div>
+                                            <div class="text-xs text-gray-500 mt-1 whitespace-nowrap">區分權 ${mixOR.toFixed(2)}%</div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     `;
                 } else {
-                    // List mode: single column for one topic per row
-                    publicDashboardContent.className = 'grid grid-cols-1 gap-6 flex-grow overflow-y-auto min-h-0 pb-20 md:pb-0';
-                    // 列表模式：原本的全部議題一併呈現，加入切換控制與議題資訊
+                    // List mode: all topics as rows in a single table
+                    publicDashboardContent.className = 'flex-grow overflow-y-auto min-h-0 pb-20 md:pb-0 w-full';
                     controlsHtml = `
-                        <div class="relative w-full h-9">
-                            <div class="absolute left-1/2 -translate-x-1/2">${toggleHtml}</div>
-                            <button id="toggle-public-view-mode" class="absolute right-0 px-2 py-1 text-xs sm:text-sm bg-gray-200 hover:bg-gray-300 rounded">切換為分頁</button>
+                        <div class="w-full">
+                            <div class="relative w-full h-9">
+                                <div class="absolute left-1/2 -translate-x-1/2">${toggleHtml}</div>
+                            </div>
                         </div>
                     `;
+                    let rowsHtml = '';
                     topics.forEach((t, idx) => {
                         const eligibleResidents = checkedInResidents.filter(r => isResidentAllowedForTopicPublic(r, t));
                         const eligibleResidentIdSet = new Set(eligibleResidents.map(r => r.id));
                         const eligibleCount = eligibleResidents.reduce((sum, r) => sum + (parseInt(r.householdCount, 10) || 1), 0);
-                        const eligibleOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + (parseFloat(r.ownership) || 0), 0);
                         const eligibleValidOwnershipTotal = eligibleResidents.reduce((sum, r) => sum + getVOPublic(r), 0);
                         const tvotes = votes.filter(v => v.topicId === t.id);
                         const selectionByResident = new Map();
@@ -5699,80 +5754,66 @@ const topicCells = currentTopics.map((t, tIdx) => {
                         const totalEligibleVotes = eligibleResidents.reduce((sum, r) => sum + getVVPublic(r), 0);
                         const votedEligibleVotes = eligibleResidents.reduce((sum, r) => selectionByResident.has(r.id) ? sum + getVVPublic(r) : sum, 0);
                         const notVotedEligibleVotes = Math.max(totalEligibleVotes - votedEligibleVotes, 0);
-                        const optionStats = (Array.isArray(t.options) ? t.options : []).map((opt, optIdx) => {
-                            let count = 0;
-                            let ownershipSum = 0;
-                            selectionByResident.forEach((set, rid) => {
-                                if (set.has(optIdx) && eligibleResidentIdSet.has(rid)) {
-                                    const rr = residentsById[rid];
-                                    count += getVVPublic(rr);
-                                    ownershipSum += getVOPublic(rr);
-                                }
-                            });
-                            return { label: opt.label || `選項${optIdx + 1}`, count, ownership: ownershipSum };
-                        });
                         const countThreshold = parseFloat(t.passCountThresholdPercent ?? 50);
                         const ownershipThreshold = parseFloat(t.passOwnershipThresholdPercent ?? 50);
-                        const optsHtml = optionStats.map(s => {
-                            const countRatio = totalEligibleVotes > 0 ? (s.count / totalEligibleVotes) * 100 : 0;
-                            const ownershipRatio = eligibleValidOwnershipTotal > 0 ? (s.ownership / eligibleValidOwnershipTotal) * 100 : 0;
-                            const meetsBoth = countRatio >= countThreshold && ownershipRatio >= ownershipThreshold;
-                            const meetsEither = !meetsBoth && (countRatio >= countThreshold || ownershipRatio >= ownershipThreshold);
-                            const highlight = meetsBoth ? 'border-2 border-green-500' : (meetsEither ? 'border-2 border-yellow-500' : 'border border-gray-200');
-                            return `
-                                <div class="${highlight} rounded-md p-3">
-                                    <div class="font-semibold whitespace-nowrap text-xs sm:text-sm md:text-base lg:text-xl xl:text-2xl mb-2">${s.label}</div>
-                                    <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl mb-1">
-                                        <div class="whitespace-nowrap">投票戶數：</div>
-                                        <div class="whitespace-nowrap font-bold text-blue-600">${s.count}（${countRatio.toFixed(2)}%）</div>
-                                    </div>
-                                    <div class="text-gray-600 text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl">
-                                        <div class="whitespace-nowrap">區分權比例：</div>
-                                        <div class="whitespace-nowrap font-bold text-blue-600">${ownershipRatio.toFixed(2)}%</div>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('');
+                        const aggregated = aggregateTopicStatsPublic(t, eligibleResidents, eligibleResidentIdSet, eligibleValidOwnershipTotal, totalEligibleVotes, selectionByResident, residentsById);
+                        const combinedL = {
+                            count: aggregated.invalid.count + aggregated.notVoted.count,
+                            ownership: aggregated.invalid.ownership + aggregated.notVoted.ownership
+                        };
+                        const agreeCountRatio = totalEligibleVotes > 0 ? (aggregated.agree.count / totalEligibleVotes) * 100 : 0;
+                        const agreeOwnershipRatio = eligibleValidOwnershipTotal > 0 ? (aggregated.agree.ownership / eligibleValidOwnershipTotal) * 100 : 0;
+                        const agreePassed = agreeCountRatio >= countThreshold && agreeOwnershipRatio >= ownershipThreshold;
+                        const disagreeCountRatio = totalEligibleVotes > 0 ? (aggregated.disagree.count / totalEligibleVotes) * 100 : 0;
+                        const disagreeOwnershipRatio = eligibleValidOwnershipTotal > 0 ? (aggregated.disagree.ownership / eligibleValidOwnershipTotal) * 100 : 0;
+                        const mixCountRatio = totalEligibleVotes > 0 ? (combinedL.count / totalEligibleVotes) * 100 : 0;
+                        const mixOwnershipRatio = eligibleValidOwnershipTotal > 0 ? (combinedL.ownership / eligibleValidOwnershipTotal) * 100 : 0;
                         const proposerText = t?.proposer?.type === 'resident' ? `住戶(${t?.proposer?.unit || ''})` : '管委會';
                         const displayName = getTopicDisplayNamePublic(t, idx);
-                        html += `
-                            <div class="bg-white p-4 rounded-lg shadow-sm">
-                                <div class="flex items-center justify-between">
-                                    <div>
-                                        <div class="font-semibold whitespace-nowrap text-lg sm:text-xl md:text-2xl lg:text-3xl">${displayName}</div>
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                        <div class="text-gray-600 whitespace-nowrap text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl text-right">
-                                            <div>已報到應投票戶數：<span class="font-bold text-blue-600">${eligibleCount}</span></div>
-                                            <div class="mt-1">
-                                                <span>已投票(有效票數)：<span class="font-bold text-blue-600">${votedEligibleVotes}</span></span>
-                                                <span class="mx-2">｜</span>
-                                                <span>未投票(有效票數)：<span class="font-bold text-blue-600">${notVotedEligibleVotes}</span></span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="grid gap-3 mt-3" style="grid-template-columns: repeat(${optionStats.length || 1}, minmax(0, 1fr));">
-                                    ${optsHtml}
-                                </div>
-                            </div>
+                        rowsHtml += `
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-3 py-3 border-b border-gray-100 whitespace-nowrap sticky left-0 bg-white z-[1]"><span class="font-bold text-sm sm:text-base md:text-lg">${displayName}</span></td>
+                                <td class="px-3 py-3 border-b border-gray-100 text-center font-bold text-gray-800 whitespace-nowrap">${eligibleCount}<div class="text-[10px] sm:text-xs text-gray-500 mt-1">已投票 ${votedEligibleVotes}／未投票 ${notVotedEligibleVotes}</div></td>
+                                <td class="px-3 py-3 border-b border-gray-100 text-center ${agreePassed ? 'bg-green-50' : ''}">
+                                    <div class="font-bold text-blue-600 whitespace-nowrap">${aggregated.agree.count}（${agreeCountRatio.toFixed(2)}%）</div>
+                                    <div class="text-xs text-blue-500 mt-1 whitespace-nowrap">區分權 ${agreeOwnershipRatio.toFixed(2)}%</div>
+                                </td>
+                                <td class="px-3 py-3 border-b border-gray-100 text-center">
+                                    <div class="font-bold text-red-600 whitespace-nowrap">${aggregated.disagree.count}（${disagreeCountRatio.toFixed(2)}%）</div>
+                                    <div class="text-xs text-red-500 mt-1 whitespace-nowrap">區分權 ${disagreeOwnershipRatio.toFixed(2)}%</div>
+                                </td>
+                                <td class="px-3 py-3 border-b border-gray-100 text-center bg-gray-50">
+                                    <div class="font-bold text-gray-700 whitespace-nowrap">${combinedL.count}（${mixCountRatio.toFixed(2)}%）</div>
+                                    <div class="text-xs text-gray-500 mt-1 whitespace-nowrap">區分權 ${mixOwnershipRatio.toFixed(2)}%</div>
+                                </td>
+                            </tr>
                         `;
                     });
+                    html = `
+                        <div class="bg-white rounded-lg shadow-sm overflow-x-auto">
+                            <table class="min-w-full text-xs sm:text-sm">
+                                <thead class="bg-gray-100 text-gray-700">
+                                    <tr>
+                                        <th class="px-3 py-2 text-left whitespace-nowrap border-b border-gray-200 sticky left-0 bg-gray-100 z-10">議題</th>
+                                        <th class="px-3 py-2 text-center whitespace-nowrap border-b border-gray-200">應投票戶數</th>
+                                        <th class="px-3 py-2 text-center whitespace-nowrap border-b border-gray-200">同意<br><span class="text-[10px] font-normal text-gray-500">有效票數／區分權</span></th>
+                                        <th class="px-3 py-2 text-center whitespace-nowrap border-b border-gray-200">不同意<br><span class="text-[10px] font-normal text-gray-500">有效票數／區分權</span></th>
+                                        <th class="px-3 py-2 text-center whitespace-nowrap border-b border-gray-200">未投票、廢票<br><span class="text-[10px] font-normal text-gray-500">有效票數／區分權</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody>${rowsHtml || '<tr><td colspan="5" class="px-3 py-8 text-center text-gray-500">尚無議題資料</td></tr>'}</tbody>
+                            </table>
+                        </div>
+                    `;
                 }
+                // end of mode blocks
 
                 publicControls.innerHTML = controlsHtml;
                 const chkBtn2 = publicControls.querySelector('#public-toggle-checkin');
                 const voteBtn2 = publicControls.querySelector('#public-toggle-vote');
-                if (chkBtn2) chkBtn2.addEventListener('click', (e) => { e.preventDefault(); updatePublicUrlAndTarget('checkin'); renderPublicDashboard(eventData, residentsData); });
-                if (voteBtn2) voteBtn2.addEventListener('click', (e) => { e.preventDefault(); updatePublicUrlAndTarget('vote'); renderPublicVoteDashboard(eventData, residentsData); });
+                if (chkBtn2) chkBtn2.addEventListener('click', (e) => { e.preventDefault(); window.publicVoteSubMode = 'summary'; updatePublicUrlAndTarget('checkin'); renderPublicDashboard(eventData, residentsData); });
+                if (voteBtn2) voteBtn2.addEventListener('click', (e) => { e.preventDefault(); window.publicVoteSubMode = 'summary'; updatePublicUrlAndTarget('vote'); renderPublicVoteDashboard(eventData, residentsData); });
                 publicDashboardContent.innerHTML = html;
-                const toggleBtn = publicControls.querySelector('#toggle-public-view-mode');
-                if (toggleBtn) {
-                    toggleBtn.addEventListener('click', () => {
-                        window.publicVoteViewMode = (mode === 'tabs') ? 'list' : 'tabs';
-                        renderPublicVoteDashboard(eventData, residentsData);
-                    });
-                }
                 publicControls.querySelectorAll('.public-topic-tab').forEach(btn => {
                     btn.addEventListener('click', () => {
                         const idx = parseInt(btn.getAttribute('data-idx'), 10) || 0;
