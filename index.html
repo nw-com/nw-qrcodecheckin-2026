@@ -3166,6 +3166,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 let totalHouseholds = 0;
                 let totalValidVotes = 0;
                 let checkedInValidVotes = 0;
+                let checkedInHouseholds = 0;
 
                 allResidentsForSelectedEvent.forEach(resident => {
                     const ownershipValue = parseFloat(resident.ownership) || 0;
@@ -3179,6 +3180,7 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     if (resident.isCheckedIn) {
                         checkedInCount++;
                         checkedInValidVotes += vv;
+                        checkedInHouseholds += hc;
                         checkedInOwnership += ownershipValue;
                         checkedInValidOwnership += validOwnershipValue;
                         recentCheckIns.push(resident);
@@ -3197,9 +3199,9 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 document.getElementById('ownership-check-in-rate').textContent = `${ownershipRate}%`;
 
                 const targetHouseholds = Math.ceil(totalHouseholds * (parseFloat(currentPersonQuorumRatio) || 0) / 100);
-                const targetValidVotes = Math.ceil(totalValidVotes * (parseFloat(currentPersonQuorumRatio) || 0) / 100);
-                const targetValidOwnership = parseFloat((totalValidOwnership * (parseFloat(currentQuorumRatio) || 0) / 100).toFixed(4));
-                const isReached = checkedInValidVotes >= targetValidVotes;
+                const targetValidVotes = targetHouseholds; // 以目標戶數為主
+                const targetValidOwnership = parseFloat(currentQuorumRatio) || 0; // 以目標門檻%為主
+                const isReached = checkedInHouseholds >= targetHouseholds;
                 const reachedText = isReached ? ' (已到達)' : '';
                 const colorClass = isReached ? 'text-green-600' : 'text-red-600';
                 const isOwnershipReached = checkedInValidOwnership >= targetValidOwnership;
@@ -5485,9 +5487,9 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const ownershipQuorumReached = ownershipQuorumRatio > 0 && ownershipRate >= ownershipQuorumRatio;
 
                 const targetHouseholdsVal = Math.ceil(totalHouseholds * (parseFloat(personQuorumRatio) || 0) / 100);
-                const targetValidVotesVal = Math.ceil(totalValidVotes * (parseFloat(personQuorumRatio) || 0) / 100);
-                const targetValidOwnershipVal = parseFloat((totalValidOwnership * (parseFloat(ownershipQuorumRatio) || 0) / 100).toFixed(4));
-                const isReachedVal = checkedInValidVotes >= targetValidVotesVal;
+                const targetValidVotesVal = targetHouseholdsVal; // 以目標戶數為主
+                const targetValidOwnershipVal = parseFloat(ownershipQuorumRatio) || 0; // 以目標門檻%為主
+                const isReachedVal = checkedInHouseholds >= targetHouseholdsVal;
                 const reachedTextVal = isReachedVal ? ' (已到達)' : '';
                 const colorClassVal = isReachedVal ? 'text-green-600' : 'text-red-600';
                 const isOwnershipReachedVal = checkedInValidOwnership >= targetValidOwnershipVal;
