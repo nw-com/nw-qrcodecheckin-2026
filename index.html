@@ -3207,8 +3207,8 @@ const topicCells = currentTopics.map((t, tIdx) => {
                 const isOwnershipReached = checkedInValidOwnership >= targetValidOwnership;
                 const ownershipReachedText = isOwnershipReached ? ' (已到達)' : '';
                 const ownershipColorClass = isOwnershipReached ? 'text-green-600' : 'text-red-600';
-                document.getElementById('person-ratio-target').innerHTML = `(目標: ${currentPersonQuorumRatio}%／目標戶數: ${targetHouseholds}／目標有效票數: ${targetValidVotes} | 報到有效票數: <span class="${colorClass}">${checkedInValidVotes}${reachedText}</span>)`;
-                document.getElementById('ownership-ratio-target').innerHTML = `(目標: ${currentQuorumRatio}%／目標區分權: ${targetValidOwnership.toFixed(2)}% | 報到有效區分權: <span class="${ownershipColorClass}">${checkedInValidOwnership.toFixed(2)}%${ownershipReachedText}</span>)`;
+                document.getElementById('person-ratio-target').innerHTML = `(目標: ${currentPersonQuorumRatio}%／目標戶數: ${targetHouseholds})`;
+                document.getElementById('ownership-ratio-target').innerHTML = `(目標: ${currentQuorumRatio}%)`;
 
 
                 if (currentPersonQuorumRatio > 0 && personRate >= currentPersonQuorumRatio) {
@@ -5511,14 +5511,14 @@ const topicCells = currentTopics.map((t, tIdx) => {
                     </div>
                     <div class="bg-white px-6 py-6 rounded-xl shadow-md flex flex-col items-start justify-center h-full text-left">
                          <div>
-                             <p class="text-2xl font-medium text-gray-500">戶數報到率 <span class="text-xs">(目標: ${personQuorumRatio}%／目標戶數: ${targetHouseholdsVal}／目標有效票數: ${targetValidVotesVal} | 報到有效票數: <span class="${colorClassVal}">${checkedInValidVotes}${reachedTextVal}</span>)</span></p>
+                             <p class="text-2xl font-medium text-gray-500">戶數報到率 <span class="text-xs">(目標: ${personQuorumRatio}%／目標戶數: ${targetHouseholdsVal})</span></p>
                              <p class="text-5xl font-bold text-orange-600">${personRate}%</p>
                          </div>
                         <span class="${personQuorumReached ? '' : 'hidden'} text-green-600 font-bold text-lg mt-2">已達法定開會人數</span>
                     </div>
                     <div class="bg-white px-6 py-6 rounded-xl shadow-md flex flex-col items-start justify-center h-full text-left">
                          <div>
-                             <p class="text-2xl font-medium text-gray-500">區分權報到率 <span class="text-xs">(目標: ${ownershipQuorumRatio}%／目標區分權: ${targetValidOwnershipVal.toFixed(2)}% | 報到有效區分權: <span class="${ownershipColorClassVal}">${checkedInValidOwnership.toFixed(2)}%${ownershipReachedTextVal}</span>)</span></p>
+                             <p class="text-2xl font-medium text-gray-500">區分權報到率 <span class="text-xs">(目標: ${ownershipQuorumRatio}%)</span></p>
                              <p class="text-5xl font-bold text-blue-600">${ownershipRate}%</p>
                          </div>
                         <span class="${ownershipQuorumReached ? '' : 'hidden'} text-green-600 font-bold text-lg mt-2">已達法定開會區分權比例</span>
